@@ -1,0 +1,30 @@
+version: "3.8"
+services:
+  # gin:
+  #   build: .
+  #   ports:
+  #     - "8080:8080"
+  #   depends_on:
+  #     - mysql
+  #     - redis
+  #   environment:
+  #     - MYSQL_DSN=root:password@tcp(mysql:3306)/testdb
+  #     - REDIS_ADDR=redis:6379
+  #   restart: always
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: testdb
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: always
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    restart: always

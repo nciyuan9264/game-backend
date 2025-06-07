@@ -1,0 +1,472 @@
+definitions:
+  dto.ErrorResponse:
+    properties:
+      code:
+        example: 400
+        type: integer
+      message:
+        example: 参数错误
+        type: string
+    type: object
+  dto.LoginRequest:
+    description: 用户登录请求体
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  dto.LoginResponse:
+    description: 登录成功返回token
+    properties:
+      access_token:
+        type: string
+      refresh_token:
+        type: string
+    type: object
+  dto.MenuCreateReqDTO:
+    properties:
+      child_menus:
+        description: 子菜单（树结构）
+        items:
+          $ref: '#/definitions/dto.MenuCreateReqDTO'
+        type: array
+      description:
+        type: string
+      icon:
+        description: 图标
+        type: string
+      id:
+        type: integer
+      name:
+        type: string
+      parent_id:
+        type: integer
+      parent_menu:
+        allOf:
+        - $ref: '#/definitions/dto.MenuCreateReqDTO'
+        description: 父菜单（树结构）
+      type:
+        description: 菜单类型 1目录 2实际菜单
+        type: integer
+    type: object
+  dto.RefreshTokenRequest:
+    properties:
+      refresh_token:
+        type: string
+    required:
+    - refresh_token
+    type: object
+  dto.RefreshTokenResponse:
+    properties:
+      access_token:
+        type: string
+    type: object
+  dto.RoleDetailResDTO:
+    properties:
+      menus:
+        items:
+          $ref: '#/definitions/dto.MenuCreateReqDTO'
+        type: array
+      roleInfo:
+        $ref: '#/definitions/dto.RoleInfoDTO'
+    type: object
+  dto.RoleInfoDTO:
+    properties:
+      description:
+        type: string
+      icon:
+        type: string
+      id:
+        type: integer
+      name:
+        type: string
+    type: object
+  dto.RoleInfoListResDTO:
+    properties:
+      list:
+        items:
+          $ref: '#/definitions/dto.RoleInfoDTO'
+        type: array
+      total:
+        type: integer
+    type: object
+  dto.UpdateAndCreateRoleInfoReqDTO:
+    properties:
+      description:
+        type: string
+      icon:
+        type: string
+      id:
+        type: integer
+      name:
+        type: string
+      permissionIds:
+        items:
+          type: integer
+        type: array
+    required:
+    - name
+    type: object
+  entities.Menu:
+    properties:
+      child_menus:
+        description: 子菜单（树结构）
+        items:
+          $ref: '#/definitions/entities.Menu'
+        type: array
+      create_time:
+        description: 创建时间
+        type: string
+      description:
+        description: 描述
+        type: string
+      icon:
+        description: 图标
+        type: string
+      id:
+        description: 主键
+        type: integer
+      is_deleted:
+        description: 是否已删除
+        type: boolean
+      name:
+        description: 菜单名称
+        type: string
+      parent_id:
+        description: 父菜单ID，根节点为nil
+        type: integer
+      parent_menu:
+        allOf:
+        - $ref: '#/definitions/entities.Menu'
+        description: 父菜单（树结构）
+      type:
+        description: 菜单类型 1目录 2实际菜单
+        type: integer
+      update_time:
+        description: 更新时间
+        type: string
+    type: object
+info:
+  contact: {}
+paths:
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 登录参数
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/dto.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.LoginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      summary: 用户登录
+      tags:
+      - Auth
+  /auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: 通过refresh token获取新的access token
+      parameters:
+      - description: 刷新token参数
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/dto.RefreshTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.RefreshTokenResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      summary: 刷新access token
+      tags:
+      - Auth
+  /menu/add:
+    post:
+      consumes:
+      - application/json
+      description: 创建新菜单
+      parameters:
+      - description: 菜单信息
+        in: body
+        name: menu
+        required: true
+        schema:
+          $ref: '#/definitions/dto.MenuCreateReqDTO'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/entities.Menu'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 添加菜单
+      tags:
+      - 菜单管理
+  /menu/all:
+    get:
+      consumes:
+      - application/json
+      description: 获取菜单列表
+      parameters:
+      - description: 父菜单ID
+        in: query
+        name: parentId
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/entities.Menu'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 获取所有菜单
+      tags:
+      - 菜单管理
+  /menu/delete:
+    delete:
+      consumes:
+      - application/json
+      description: 删除菜单
+      parameters:
+      - collectionFormat: csv
+        description: 菜单ID列表
+        in: query
+        items:
+          type: integer
+        name: ids
+        required: true
+        type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 删除菜单
+      tags:
+      - 菜单管理
+  /menu/update:
+    put:
+      consumes:
+      - application/json
+      description: 更新菜单信息
+      parameters:
+      - description: 菜单信息
+        in: body
+        name: menu
+        required: true
+        schema:
+          $ref: '#/definitions/dto.MenuCreateReqDTO'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/entities.Menu'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 更新菜单
+      tags:
+      - 菜单管理
+  /role/add:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 角色信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateAndCreateRoleInfoReqDTO'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.RoleDetailResDTO'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 新增角色
+      tags:
+      - role
+  /role/all:
+    get:
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.RoleInfoListResDTO'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取所有角色
+      tags:
+      - role
+  /role/delete:
+    delete:
+      parameters:
+      - description: 角色ID列表，逗号分隔
+        in: query
+        name: ids
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 删除角色
+      tags:
+      - role
+  /role/detail/{id}:
+    get:
+      parameters:
+      - description: 角色ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.RoleDetailResDTO'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取角色详情
+      tags:
+      - role
+  /role/update:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 角色信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateAndCreateRoleInfoReqDTO'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.RoleDetailResDTO'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 修改角色
+      tags:
+      - role
+swagger: "2.0"
