@@ -10,7 +10,7 @@ type Player struct {
 }
 
 type RoomInfo struct {
-	RoomID     string `json:"roomId"`
+	RoomID     string `json:"roomID"`
 	MaxPlayers int    `json:"maxPlayers"`
 	Status     string `json:"status"`
 }

@@ -34,7 +34,7 @@ func CreateRoom(maxPlayers int) (string, error) {
 	uuidStr := uuid.New().String()
 	roomID := strings.ReplaceAll(uuidStr, "-", "")[:8]
 
-	roomKey := fmt.Sprintf("room:%s:info", roomID)
+	roomKey := fmt.Sprintf("room:%s:roomInfo", roomID)
 
 	// 初始化房间信息
 	_, err := rdb.HSet(ctx, roomKey, map[string]interface{}{
@@ -46,49 +46,49 @@ func CreateRoom(maxPlayers int) (string, error) {
 	}
 
 	companyData := map[string]map[string]interface{}{
-		"sackson": {
+		"Sackson": {
 			"name":       "Sackson",
 			"stockTotal": 25,
 			"tiles":      0,    // 初始数量
 			"stockPrice": 200,  // 初始参考股价（可调整）
 			"valuation":  5000, // 初始估值
 		},
-		"zeta": {
+		"Tower": {
 			"name":       "Tower",
 			"tiles":      0, // 初始数量
 			"stockTotal": 25,
 			"stockPrice": 200,
 			"valuation":  5000,
 		},
-		"fusion": {
+		"American": {
 			"name":       "American",
 			"tiles":      0, // 初始数量
 			"stockTotal": 25,
 			"stockPrice": 200,
 			"valuation":  5000,
 		},
-		"america": {
+		"Festival": {
 			"name":       "Festival",
 			"tiles":      0, // 初始数量
 			"stockTotal": 25,
 			"stockPrice": 200,
 			"valuation":  5000,
 		},
-		"phoenix": {
+		"Worldwide": {
 			"name":       "Worldwide",
 			"tiles":      0, // 初始数量
 			"stockTotal": 25,
 			"stockPrice": 200,
 			"valuation":  5000,
 		},
-		"quantum": {
+		"Continental": {
 			"name":       "Continental",
 			"tiles":      0, // 初始数量
 			"stockTotal": 25,
 			"stockPrice": 200,
 			"valuation":  5000,
 		},
-		"hydra": {
+		"Imperial": {
 			"name":       "Imperial",
 			"tiles":      0, // 初始数量
 			"stockTotal": 25,
@@ -102,6 +102,7 @@ func CreateRoom(maxPlayers int) (string, error) {
 		if _, err := rdb.HSet(ctx, companyKey, data).Result(); err != nil {
 			return "", fmt.Errorf("初始化公司[%s]失败: %w", id, err)
 		}
+		rdb.SAdd(ctx, fmt.Sprintf("room:%s:company_ids", roomID), id)
 	}
 
 	tileKey := fmt.Sprintf("room:%s:tiles", roomID)
@@ -147,7 +148,7 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 	rdb := repository.Rdb
 
 	// 获取所有房间 key（匹配 room:*:info）
-	keys, err := rdb.Keys(ctx, "room:*:info").Result()
+	keys, err := rdb.Keys(ctx, "room:*:roomInfo").Result()
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +157,7 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 
 	for _, key := range keys {
 		// 获取 roomId（从 key 中提取）
-		// key 格式：room:<roomId>:info
+		// key 格式：room:<roomID>:info
 		parts := strings.Split(key, ":")
 		if len(parts) < 3 {
 			continue

@@ -14,7 +14,7 @@ func InitRouter(r *gin.Engine) {
 		api.POST("/create", controller.CreateRoom)
 		api.GET("/list", controller.GetRoomList) // ✅ 新增这一行
 		// api.POST("/join", controller.JoinRoom)
-		api.GET("/:roomId", controller.GetRoomInfo)
+		api.GET("/:roomID", controller.GetRoomInfo)
 	}
 
 	// WebSocket 路由

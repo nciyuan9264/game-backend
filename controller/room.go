@@ -47,7 +47,7 @@ func GetRoomList(c *gin.Context) {
 }
 
 // func JoinRoom(c *gin.Context) {
-// 	roomID := c.Query("roomId")
+// 	roomID := c.Query("roomID")
 // 	playerID := c.Query("playerId")
 
 // 	err := service.JoinRoom(roomID, playerID)
