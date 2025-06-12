@@ -1,38 +1,76 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"go-game/dto"
 	"go-game/repository"
 	"log"
-	"net/http"
 	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
-	"github.com/mitchellh/mapstructure"
-
 	"github.com/gorilla/websocket"
+	"golang.org/x/exp/rand"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
-
 // 房间内的所有连接（简化版）
-var rooms = make(map[string][]PlayerConn)
+var rooms = make(map[string][]dto.PlayerConn)
 var roomLock sync.Mutex
 
 // 广播消息给房间内所有连接成功的玩家
-func broadcastToRoom(roomID string, message []byte) {
+func broadcastToRoom(roomID string) {
 	roomLock.Lock()
 	defer roomLock.Unlock()
 
-	newList := []PlayerConn{}
+	companyInfoMap, err := GetCompanyInfo(repository.Rdb, roomID)
+	if err != nil {
+		log.Println("获取公司信息失败:", err)
+		return
+	}
+
+	tileMap, err := GetAllRoomTiles(repository.Rdb, roomID)
+	if err != nil {
+		log.Println("获取所有 tile 失败:", err)
+		return
+	}
+	allTileMap := make(map[string]int)
+	for _, tile := range tileMap {
+		if tile.Belong != "" && tile.Belong != "Blank" {
+			allTileMap[tile.Belong] = allTileMap[tile.Belong] + 1
+		}
+	}
+
+	allStockMap := make(map[string]int)
+	for _, pc := range rooms[roomID] {
+		stockMap, err := GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, pc.PlayerID)
+		if err != nil {
+			log.Printf("❌ 获取玩家[%s]股票失败: %v\n", pc.PlayerID, err)
+			return
+		}
+		for stockID, stockCount := range stockMap {
+			allStockMap[stockID] += stockCount
+		}
+	}
+
+	for companyName, info := range companyInfoMap {
+		stockLeft := 25 - allStockMap[companyName]
+		info.StockTotal = stockLeft
+		info.Tiles = allTileMap[companyName]
+		companyInfoMap[companyName] = info // 注意：结构体是值传递，需要再赋值回去！
+	}
+
+	err = SetCompanyInfo(repository.Rdb, roomID, companyInfoMap)
+	if err != nil {
+		log.Println("❌ 设置公司信息失败:", err)
+		return
+	}
+
+	newList := []dto.PlayerConn{}
 	for _, pc := range rooms[roomID] {
 		// 尝试发送消息
-		if err := pc.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
+		if err := SyncRoomMessage(pc.Conn, roomID, pc.PlayerID); err != nil {
 			log.Println("广播失败，移除连接:", pc.PlayerID)
 			pc.Conn.Close()
 		} else {
@@ -43,20 +81,191 @@ func broadcastToRoom(roomID string, message []byte) {
 	rooms[roomID] = newList
 }
 
-// 玩家连接对象结构体
-type PlayerConn struct {
-	PlayerID string          // 玩家ID
-	Conn     *websocket.Conn // 连接对象
+func SwitchToNextPlayer(rdb *redis.Client, ctx context.Context, roomID, currentID string) error {
+	roomLock.Lock()
+	defer roomLock.Unlock()
+
+	players, ok := rooms[roomID]
+	if !ok || len(players) == 0 {
+		return fmt.Errorf("房间 %s 没有玩家", roomID)
+	}
+
+	// 找到当前玩家索引
+	var currentIndex int = -1
+	for i, pc := range players {
+		if pc.PlayerID == currentID {
+			currentIndex = i
+			break
+		}
+	}
+
+	if currentIndex == -1 {
+		return fmt.Errorf("未找到当前玩家 %s", currentID)
+	}
+
+	// 下一个玩家索引（循环）
+	nextIndex := (currentIndex + 1) % len(players)
+	nextPlayerID := players[nextIndex].PlayerID
+
+	// 设置当前玩家
+	if err := SetCurrentPlayer(rdb, ctx, roomID, nextPlayerID); err != nil {
+		return fmt.Errorf("切换当前玩家失败: %w", err)
+	}
+
+	log.Printf("✅ 已将当前玩家切换为: %s\n", nextPlayerID)
+	return nil
 }
 
-// 构建一条统一格式的消息（type + data）
-func buildMessage(msgType string, data map[string]interface{}) []byte {
-	if data == nil {
-		data = make(map[string]interface{})
+// 向该客户端发送同步消息
+func SyncRoomMessage(conn *websocket.Conn, roomID string, playerID string) error {
+	rdb := repository.Rdb
+	ctx := repository.Ctx
+
+	// 构建 key
+	infoKey := fmt.Sprintf("room:%s:player:%s:info", roomID, playerID)
+	stocksKey := fmt.Sprintf("room:%s:player:%s:stocks", roomID, playerID)
+	tilesKey := fmt.Sprintf("room:%s:player:%s:tiles", roomID, playerID)
+	currentPlayerKey := fmt.Sprintf("room:%s:currentPlayer", roomID)
+	currentStepKey := fmt.Sprintf("room:%s:currentStep", roomID)
+	roomInfoKey := fmt.Sprintf("room:%s:roomInfo", roomID)
+	companyIDsKey := fmt.Sprintf("room:%s:company_ids", roomID)
+
+	// pipeline 批量读取
+	pipe := rdb.Pipeline()
+
+	infoCmd := pipe.HGetAll(ctx, infoKey)
+	stocksCmd := pipe.HGetAll(ctx, stocksKey)
+	tilesCmd := pipe.LRange(ctx, tilesKey, 0, -1)
+	currentPlayerCmd := pipe.Get(ctx, currentPlayerKey)
+	currentStepCmd := pipe.Get(ctx, currentStepKey)
+	roomInfoCmd := pipe.HGetAll(ctx, roomInfoKey)
+	companyIDsCmd := pipe.SMembers(ctx, companyIDsKey)
+
+	// 新增的 key 相关
+	dividendKey := fmt.Sprintf("room:%s:merge_bonus_temp", roomID)
+	clearPlayerKey := fmt.Sprintf("room:%s:merge_clear_players_temp", roomID)
+	mainHotelNameKey := fmt.Sprintf("room:%s:merge_main_hotel_name_temp", roomID)
+	createTileKey := fmt.Sprintf("room:%s:create_company_tile_temp", roomID)
+
+	// pipeline 增加对应命令
+	dividendCmd := pipe.Get(ctx, dividendKey)
+	clearPlayerCmd := pipe.Get(ctx, clearPlayerKey)
+	mainHotelNameCmd := pipe.Get(ctx, mainHotelNameKey)
+	createTileCmd := pipe.Get(ctx, createTileKey)
+
+	// 执行 pipeline
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		return fmt.Errorf("pipeline 执行失败: %w", err)
 	}
-	data["type"] = msgType // 加入消息类型字段
-	msg, _ := json.Marshal(data)
-	return msg
+
+	// 提取结果
+	info := infoCmd.Val()
+	stocks := stocksCmd.Val()
+	tiles := tilesCmd.Val()
+	currentPlayer := currentPlayerCmd.Val()
+	currentStep := currentStepCmd.Val()
+	roomInfo := roomInfoCmd.Val()
+	companyIDs := companyIDsCmd.Val()
+
+	// 获取公司信息也使用 pipeline 批量读取
+	companyInfo := make(map[string]map[string]string)
+	pipe2 := rdb.Pipeline()
+	companyCmds := make(map[string]*redis.StringStringMapCmd)
+
+	for _, companyID := range companyIDs {
+		companyKey := fmt.Sprintf("room:%s:company:%s", roomID, companyID)
+		cmd := pipe2.HGetAll(ctx, companyKey)
+		companyCmds[companyID] = cmd
+	}
+	_, err = pipe2.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("pipeline 获取公司信息失败: %w", err)
+	}
+
+	for companyID, cmd := range companyCmds {
+		companyInfo[companyID] = cmd.Val()
+	}
+
+	// 获取房间 tile
+	tileMap, err := GetAllRoomTiles(rdb, roomID)
+	if err != nil {
+		return fmt.Errorf("❌ 获取房间 tile 信息失败: %w", err)
+	}
+
+	// 组装数据
+	playerData := map[string]interface{}{
+		"info":   info,
+		"stocks": stocks,
+		"tiles":  tiles,
+	}
+	// 执行后取出
+	dividend := dividendCmd.Val()
+	clearPlayer := clearPlayerCmd.Val()
+	mainHotelName := mainHotelNameCmd.Val()
+	createTile := createTileCmd.Val()
+
+	merge_other_companies_temp, err := GetMergeOtherCompanies(rdb, ctx, roomID)
+	if err != nil {
+		return fmt.Errorf("获取合并其他公司信息失败: %w", err)
+	}
+	merge_main_company_temp, err := GetMergeMainCompany(rdb, ctx, roomID)
+	if err != nil {
+		return fmt.Errorf("获取合并主公司信息失败: %w", err)
+	}
+	merge_settle_player_temp, err := GetPlayerNeedSettle(rdb, ctx, roomID)
+	if err != nil {
+		return fmt.Errorf("获取合并玩家信息失败: %w", err)
+	}
+
+	merge_selection_temp, err := GetMergingSelection(rdb, ctx, roomID)
+	if err != nil {
+		return fmt.Errorf("获取合并选择信息失败: %w", err)
+	}
+
+	mergeSettleData, err := GetMergeSettleData(repository.Ctx, rdb, roomID)
+	if err != nil {
+		return fmt.Errorf("获取合并数据失败: %w", err)
+	}
+
+	roomData := map[string]interface{}{
+		"companyInfo":                companyInfo,
+		"currentPlayer":              currentPlayer,
+		"currentStep":                currentStep,
+		"roomInfo":                   roomInfo,
+		"tiles":                      tileMap,
+		"merge_other_companies_temp": merge_other_companies_temp,
+		"merge_main_company_temp":    merge_main_company_temp,
+		"merge_settle_player_temp":   merge_settle_player_temp,
+		"merge_selection_temp":       merge_selection_temp,
+		"mergeSettleData":            mergeSettleData,
+	}
+
+	// 执行 pipeline
+	_, err = pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("pipeline 执行失败: %w", err)
+	}
+	// 添加到返回消息中
+	msg := map[string]interface{}{
+		"type":       "sync",
+		"playerId":   playerID,
+		"playerData": playerData,
+		"roomData":   roomData,
+		"temp": map[string]interface{}{
+			"merge_bonus":         dividend,
+			"merge_clear_players": clearPlayer,
+			"merge_main_hotel":    mainHotelName,
+			"create_company_tile": createTile,
+		},
+	}
+
+	// 编码并发送
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	return conn.WriteMessage(websocket.TextMessage, data)
 }
 
 // 获取房间中玩家数量
@@ -66,287 +275,62 @@ func getRoomPlayerCount(roomID string) int {
 	return len(rooms[roomID])
 }
 
-func sendRoomMessage(roomID string, playerID string) error {
-	infoKey := fmt.Sprintf("room:%s:player:%s:info", roomID, playerID)
-	stocksKey := fmt.Sprintf("room:%s:player:%s:stocks", roomID, playerID)
-	tilesKey := fmt.Sprintf("room:%s:player:%s:tiles", roomID, playerID)
-
-	// 分别取
-	info, err := repository.Rdb.HGetAll(repository.Ctx, infoKey).Result()
-	if err != nil {
-		return err
-	}
-	stocks, err := repository.Rdb.HGetAll(repository.Ctx, stocksKey).Result()
-	if err != nil {
-		return err
-	}
-	tiles, err := repository.Rdb.LRange(repository.Ctx, tilesKey, 0, -1).Result()
-	if err != nil {
-		return err
-	}
-
-	// 组装成一个结构体或 map 返回给前端
-	playerData := map[string]interface{}{
-		"info":   info,
-		"stocks": stocks,
-		"tiles":  tiles,
-	}
-
-	currentPlayer, err := repository.Rdb.Get(repository.Ctx, fmt.Sprintf("room:%s:currentPlayer", roomID)).Result()
-	if err != nil {
-		return fmt.Errorf("获取当前玩家失败: %w", err)
-	}
-	currentStep, err := repository.Rdb.Get(repository.Ctx, fmt.Sprintf("room:%s:currentStep", roomID)).Result()
-	if err != nil {
-		return fmt.Errorf("获取当前步骤失败: %w", err)
-	}
-	roomInfo, err := repository.Rdb.HGetAll(repository.Ctx, fmt.Sprintf("room:%s:roomInfo", roomID)).Result()
-	if err != nil {
-		return fmt.Errorf("获取房间信息失败: %w", err)
-	}
-	tileMap, err := GetAllRoomTiles(repository.Rdb, roomID)
-	if err != nil {
-		return fmt.Errorf("❌ 获取房间 tile 信息失败: %w", err)
-	}
-	companyIDs, err := repository.Rdb.SMembers(repository.Ctx, fmt.Sprintf("room:%s:company_ids", roomID)).Result()
-	if err != nil {
-		return fmt.Errorf("获取公司ID失败: %w", err)
-	}
-
-	companyInfo := make(map[string]map[string]string) // key: companyID, value: 公司具体信息的map
-
-	for _, companyID := range companyIDs {
-		companyKey := fmt.Sprintf("room:%s:company:%s", roomID, companyID)
-		data, err := repository.Rdb.HGetAll(repository.Ctx, companyKey).Result()
-		if err != nil {
-			return fmt.Errorf("获取公司[%s]信息失败: %w", companyID, err)
-		}
-		companyInfo[companyID] = data
-	}
-	roomData := map[string]interface{}{
-		"companyInfo":   companyInfo,
-		"currentPlayer": currentPlayer,
-		"currentStep":   currentStep,
-		"roomInfo":      roomInfo,
-		"tiles":         tileMap,
-	}
-
-	msg := map[string]interface{}{
-		"type":       "sync",
-		"playerId":   playerID,
-		"playerData": playerData, // 玩家数据
-		"roomData":   roomData,   // 房间信息
-	}
-
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	broadcastToRoom(roomID, data)
-	// err = conn.WriteMessage(websocket.TextMessage, data)
-	// if err != nil {
-	// 	return err
-	// }
-	return nil
-}
-
 // 玩家断开连接后，从房间中移除该连接
 func cleanupOnDisconnect(roomID, playerID string, conn *websocket.Conn) {
 	roomLock.Lock()
 	defer roomLock.Unlock()
 
-	newList := []PlayerConn{}
+	newList := []dto.PlayerConn{}
 	for _, pc := range rooms[roomID] {
-		if pc.Conn != conn {
+		if pc.Conn != conn && pc.PlayerID != playerID {
 			newList = append(newList, pc)
 		}
 	}
 	rooms[roomID] = newList
+	roomInfo, err := GetRoomInfo(repository.Rdb, roomID)
+	if err != nil {
+		log.Println("❌ 获取房间信息失败:", err)
+		return
+	}
+	if roomInfo.RoomStatus {
+		SetRoomStatus(repository.Rdb, roomID, false)
+	}
 	log.Printf("玩家 %s 离开房间 %s\n", playerID, roomID)
 }
 
-func handleSelectTileMessage(conn *websocket.Conn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
-	tileKey, ok := msgMap["payload"].(string)
-	if !ok {
-		log.Println("无效的 payload")
-		return
-	}
-	log.Println("收到 select_tile 消息，目标 tile:", tileKey)
-	redisKey := "room:" + roomID + ":tiles"
-	// 取出 tile 的原始数据
-	jsonStr, err := rdb.HGet(repository.Ctx, redisKey, tileKey).Result()
-	if err == redis.Nil {
-		log.Println("Tile 不存在:", tileKey)
-		return
-	} else if err != nil {
-		log.Println("读取 Redis 失败:", err)
-		return
-	}
+type messageHandler func(conn *websocket.Conn, rdb *redis.Client, roomID, playerID string, msgMap map[string]interface{})
 
-	// 解析为结构体
-	var tile dto.Tile
-	if err := json.Unmarshal([]byte(jsonStr), &tile); err != nil {
-		log.Println("解析 Tile JSON 失败:", err)
-		return
-	}
-
-	// 修改 belong 字段为 "blank"
-	tile.Belong = "Blank"
-
-	// 重新编码为 JSON 字符串
-	modifiedJson, err := json.Marshal(tile)
-	if err != nil {
-		log.Println("重新编码 Tile JSON 失败:", err)
-		return
-	}
-	// 写回 Redis
-	if err := rdb.HSet(repository.Ctx, redisKey, tileKey, modifiedJson).Err(); err != nil {
-		log.Println("写回 Redis 失败:", err)
-		return
-	}
-	log.Println("已将", tileKey, "的 belong 修改为 blank 并写回 Redis")
-	// 🔥 将 tile 从该玩家的 tile 列表中移除
-	playerTileKey := "room:" + roomID + ":player:" + playerID + ":tiles"
-	// 用 LREM 移除该 tile
-	if err := rdb.LRem(repository.Ctx, playerTileKey, 1, tileKey).Err(); err != nil {
-		log.Println("从玩家 tile 列表移除失败:", err)
-		return
-	}
-	log.Println("已从玩家", playerID, "的 tile 列表中移除", tileKey)
-	checkTileTriggerRules(TriggerRuleParams{Conn: conn, Rdb: repository.Rdb, RoomID: roomID, PlayerID: playerID, TileKey: tileKey})
-}
-
-func handleCreateCompanyMessage(conn *websocket.Conn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
-	company, ok := msgMap["payload"].(string)
-	if !ok {
-		log.Println("❌ 无效的 payload")
-		return
-	}
-	log.Println("✅ 收到 create_company 消息，目标 company:", company)
-
-	// Step 1: 取出 createTileKey
-	createTileKey := fmt.Sprintf("room:%s:create_company_tile:%s", roomID, playerID)
-	tileKey, err := rdb.Get(repository.Ctx, createTileKey).Result()
-	if err != nil {
-		log.Println("❌ 获取 createTileKey 失败:", err)
-		return
-	}
-	log.Println("✅ 创建公司使用的 tileKey:", tileKey)
-
-	// Step 2: 修改公司数据（仍用 Hash 类型保存）
-	companyKey := fmt.Sprintf("room:%s:company:%s", roomID, company)
-
-	// 获取公司 Hash 数据
-	companyMap, err := rdb.HGetAll(repository.Ctx, companyKey).Result()
-	if len(companyMap) == 0 {
-		log.Println("❌ 公司 Hash 数据为空")
-		return
-	}
-
-	var companyData dto.Company
-	decoderConfig := &mapstructure.DecoderConfig{
-		DecodeHook: stringToIntHookFunc(),
-		Result:     &companyData,
-		TagName:    "json",
-	}
-	decoder, _ := mapstructure.NewDecoder(decoderConfig)
-	if err := decoder.Decode(companyMap); err != nil {
-		log.Println("❌ 公司数据解析失败:", err)
-		return
-	}
-	// 统计公司 tiles 数量
-	connectedTiles := getConnectedTiles(rdb, roomID, tileKey)
-	companyData.Tiles = len(connectedTiles)
-	companyData.StockTotal--
-
-	// 写回 Hash
-	companyUpdateMap := map[string]interface{}{
-		"tiles":      companyData.Tiles,
-		"stockTotal": companyData.StockTotal,
-	}
-
-	if err := rdb.HSet(repository.Ctx, companyKey, companyUpdateMap).Err(); err != nil {
-		log.Println("❌ 写回公司数据失败:", err)
-		return
-	}
-
-	log.Println("✅ 公司数据已更新:", companyData)
-
-	tileMap, err := GetAllRoomTiles(rdb, roomID)
-	if err != nil {
-		log.Println("❌ 获取房间所有 tile 数据失败:", err)
-		return
-	}
-
-	for _, tileKey := range connectedTiles {
-		tile, ok := tileMap[tileKey]
-		if !ok {
-			log.Printf("⚠️ tileKey %s 不存在，跳过", tileKey)
-			continue
-		}
-
-		// 修改归属
-		tile.Belong = company
-
-		// 写回 Redis
-		if err := UpdateTileValue(rdb, roomID, tileKey, tile); err != nil {
-			log.Printf("❌ 更新 tile %s 失败: %v", tileKey, err)
-		} else {
-			log.Printf("✅ 成功更新 tile %s 的归属为 %s", tileKey, company)
-		}
-	}
-	// Step 3: 增加玩家的股票数据
-	playerStockKey := fmt.Sprintf("room:%s:player:%s:stocks", roomID, playerID)
-	if err := rdb.HIncrBy(repository.Ctx, playerStockKey, company, 1).Err(); err != nil {
-		log.Println("❌ 增加玩家股票失败:", err)
-		return
-	}
-	log.Println("✅ 玩家获得 1 股", company, "股票")
-
-	// Step 4: 清除 createTileKey
-	_ = rdb.Del(repository.Ctx, createTileKey).Err()
-	// Step 5:🔥 清除玩家的 tile
-	updateRoomStatus(rdb, roomID, dto.RoomStatusBuyStock)
-	// Step 6: 通知前端更新（可选）
-	sendRoomMessage(roomID, playerID)
+var messageHandlers = map[string]messageHandler{
+	"place_tile":        handlePlaceTileMessage,
+	"create_company":    handleCreateCompanyMessage,
+	"merging_settle":    handleMergingSettleMessage,
+	"buy_stock":         handleBuyStockMessage,
+	"merging_selection": handleMergingSelectionMessage,
 }
 
 // 持续监听客户端消息，并将其广播给房间内其他玩家
-func listenAndBroadcastMessages(roomID, playerID string, conn *websocket.Conn) {
+func listenAndBroadcastMessages(conn *websocket.Conn, roomID, playerID string) {
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			log.Println("读取消息失败:", err)
 			break
 		}
-
-		var msgMap map[string]interface{}
+		msgMap := make(map[string]interface{})
+		msgMap["playerID"] = playerID
 		if err := json.Unmarshal(msg, &msgMap); err != nil {
 			log.Println("消息解析失败:", err)
 			continue
 		}
-		if msgType, ok := msgMap["type"].(string); ok && msgType == "select_tile" {
-			handleSelectTileMessage(conn, repository.Rdb, roomID, playerID, msgMap)
+		if msgType, ok := msgMap["type"].(string); ok {
+			if handler, found := messageHandlers[msgType]; found {
+				handler(conn, repository.Rdb, roomID, playerID, msgMap)
+			} else {
+				log.Printf("⚠️ 未知的消息类型: %s", msgType)
+			}
 		}
-		if msgType, ok := msgMap["type"].(string); ok && msgType == "create_company" {
-			handleCreateCompanyMessage(conn, repository.Rdb, roomID, playerID, msgMap)
-		}
-
-		// 给消息打上来源玩家的标识
-		msgMap["from"] = playerID
-
-		sendRoomMessage(roomID, playerID)
-
+		broadcastToRoom(roomID)
 	}
-}
-
-// 将 HTTP 请求升级为 WebSocket 连接
-func upgradeConnection(c *gin.Context) (*websocket.Conn, error) {
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		log.Println("WebSocket 升级失败:", err)
-	}
-	return conn, err
 }
 
 // WebSocket 主入口（处理每个连接）
@@ -381,18 +365,32 @@ func HandleWebSocket(c *gin.Context) {
 	defer cleanupOnDisconnect(roomID, playerID, conn)
 
 	InitPlayerData(roomID, playerID)
-	// 向该客户端发送初始化消息
-	sendRoomMessage(roomID, playerID)
 
 	// 获取房间当前人数
 	playerCount := getRoomPlayerCount(roomID)
 	log.Printf("玩家加入 room=%s，ID=%s，当前人数=%d/%d", roomID, playerID, playerCount, maxPlayers)
 
-	// 如果人满了，则广播开始消息
 	if playerCount == maxPlayers {
-		broadcastToRoom(roomID, buildMessage("start", nil))
-	}
+		err = SetRoomStatus(repository.Rdb, roomID, true)
+		if err != nil {
+			log.Println("❌ 设置房间状态失败:", err)
+			return
+		}
 
-	// 进入消息监听循环
-	listenAndBroadcastMessages(roomID, playerID, conn)
+		playerID, err := GetCurrentPlayer(repository.Rdb, repository.Ctx, roomID)
+		if err != nil {
+			log.Println("❌ 获取当前玩家失败:", err)
+			return
+		}
+		if playerID == "" {
+			randomPlayerID := rooms[roomID][rand.Intn(maxPlayers)]
+			err := SetCurrentPlayer(repository.Rdb, repository.Ctx, roomID, randomPlayerID.PlayerID)
+			if err != nil {
+				log.Println("❌ 设置当前玩家失败:", err)
+				return
+			}
+		}
+	}
+	broadcastToRoom(roomID)
+	listenAndBroadcastMessages(conn, roomID, playerID)
 }

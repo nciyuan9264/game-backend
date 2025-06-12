@@ -1,18 +1,41 @@
 package ws
 
 import (
-	"encoding/json"
 	"fmt"
 	"go-game/dto"
 	"go-game/repository"
 	"log"
+	"net/http"
 	"reflect"
 	"strconv"
 
+	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
-	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	"github.com/mitchellh/mapstructure"
 )
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+func StringInSlice(target string, list []string) bool {
+	for _, item := range list {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
+// 将 HTTP 请求升级为 WebSocket 连接
+func upgradeConnection(c *gin.Context) (*websocket.Conn, error) {
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		log.Println("WebSocket 升级失败:", err)
+	}
+	return conn, err
+}
 
 func getTileBelong(rdb *redis.Client, roomID, tileKey string) (string, error) {
 	tileMap, err := GetAllRoomTiles(repository.Rdb, roomID)
@@ -63,20 +86,26 @@ func getConnectedTiles(rdb *redis.Client, roomID, startTileKey string) []string 
 	return connected
 }
 
-func updateRoomStatus(rdb *redis.Client, roomID string, status dto.RoomStatus) error {
+func SetGameStatus(rdb *redis.Client, roomID string, status dto.RoomStatus) error {
 	roomInfoKey := fmt.Sprintf("room:%s:roomInfo", roomID)
-	err := rdb.HSet(repository.Ctx, roomInfoKey, "status", string(status)).Err()
+	err := rdb.HSet(repository.Ctx, roomInfoKey, "gameStatus", string(status)).Err()
 	if err != nil {
-		log.Printf("更新房间状态失败（roomID: %s，status: %s）: %v\n", roomID, status, err)
+		log.Printf("更新房间状态失败（roomID: %s，gameStatus: %s）: %v\n", roomID, status, err)
 		return err
 	}
 	log.Printf("房间（roomID: %s）状态已更新为：%s\n", roomID, status)
 	return nil
 }
 
-// 生成匿名玩家ID（使用 UUID）
-func generateAnonymousPlayerID() string {
-	return uuid.New().String()
+func SetRoomStatus(rdb *redis.Client, roomID string, status bool) error {
+	roomInfoKey := fmt.Sprintf("room:%s:roomInfo", roomID)
+	statusStr := strconv.FormatBool(status) // 将 bool 转为字符串 "true"/"false"
+
+	err := rdb.HSet(repository.Ctx, roomInfoKey, "roomStatus", statusStr).Err()
+	if err != nil {
+		return fmt.Errorf("更新房间状态失败: %w", err)
+	}
+	return nil
 }
 
 // 自定义 HookFunc，把字符串转换成 int
@@ -89,27 +118,51 @@ func stringToIntHookFunc() mapstructure.DecodeHookFunc {
 	}
 }
 
-// 获取房间所有 tile 信息（key 为 tileID，value 为 Tile struct）
-func GetAllRoomTiles(rdb *redis.Client, roomID string) (map[string]dto.Tile, error) {
-	tileMap := make(map[string]dto.Tile)
-
-	// Redis Hash Key
-	key := fmt.Sprintf("room:%s:tiles", roomID)
-
-	// 获取 Redis Hash 所有字段
-	roomTiles, err := rdb.HGetAll(repository.Ctx, key).Result()
-	if err != nil {
-		return nil, fmt.Errorf("获取房间牌堆失败: %w", err)
+// GetConn 用于根据 roomID 和 playerID 获取对应的 WebSocket 连接
+func GetConn(roomID string, playerID string) (*websocket.Conn, error) {
+	players, ok := rooms[roomID]
+	if !ok {
+		return nil, fmt.Errorf("房间[%s]不存在", roomID)
 	}
-
-	// 解码每个 tile 的 JSON 字符串
-	for tileID, value := range roomTiles {
-		var tileInfo dto.Tile
-		if err := json.Unmarshal([]byte(value), &tileInfo); err != nil {
-			continue // 无效数据直接跳过
+	var conn *websocket.Conn
+	for _, p := range players {
+		if p.PlayerID == playerID {
+			conn = p.Conn
+			break
 		}
-		tileMap[tileID] = tileInfo
+	}
+	return conn, nil
+}
+
+// getAdjacentTileKeys 用于获取指定 tileKey 的上下左右邻接的 tileKey 列表
+func getAdjacentTileKeys(tileKey string) []string {
+	row := tileKey[:len(tileKey)-1] // 例如 "6"
+	col := tileKey[len(tileKey)-1:] // 例如 "A"
+
+	// 上下左右邻接逻辑
+	rowNum, err := strconv.Atoi(row)
+	if err != nil {
+		return nil
 	}
 
-	return tileMap, nil
+	var adjacent []string
+
+	// 上 (row-1)
+	if rowNum > 1 {
+		adjacent = append(adjacent, fmt.Sprintf("%d%s", rowNum-1, col))
+	}
+	// 下 (row+1)
+	if rowNum < 12 {
+		adjacent = append(adjacent, fmt.Sprintf("%d%s", rowNum+1, col))
+	}
+	// 左 (col-1)
+	if col[0] > 'A' {
+		adjacent = append(adjacent, fmt.Sprintf("%d%s", rowNum, string(col[0]-1)))
+	}
+	// 右 (col+1)
+	if col[0] < 'I' {
+		adjacent = append(adjacent, fmt.Sprintf("%d%s", rowNum, string(col[0]+1)))
+	}
+
+	return adjacent
 }

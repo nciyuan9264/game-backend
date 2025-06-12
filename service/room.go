@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-game/dto"
+	"go-game/entities"
 	"go-game/repository"
+	"go-game/ws"
+	"log"
 	"strconv"
 	"strings"
 
@@ -34,13 +37,12 @@ func CreateRoom(maxPlayers int) (string, error) {
 	uuidStr := uuid.New().String()
 	roomID := strings.ReplaceAll(uuidStr, "-", "")[:8]
 
-	roomKey := fmt.Sprintf("room:%s:roomInfo", roomID)
-
 	// 初始化房间信息
-	_, err := rdb.HSet(ctx, roomKey, map[string]interface{}{
-		"maxPlayers": maxPlayers,
-		"status":     "waiting",
-	}).Result()
+	err := ws.SetRoomInfo(rdb, repository.Ctx, roomID, entities.RoomInfo{
+		MaxPlayers: maxPlayers,
+		GameStatus: dto.RoomStatusSetTile,
+		RoomStatus: false,
+	})
 	if err != nil {
 		return "", fmt.Errorf("初始化房间信息失败: %w", err)
 	}
@@ -128,9 +130,10 @@ func CreateRoom(maxPlayers int) (string, error) {
 		return "", fmt.Errorf("tile 初始化 Redis 写入失败: %w", err)
 	}
 
-	// 2. 初始化当前操作玩家（第一个玩家开始）
-	currentPlayerKey := fmt.Sprintf("room:%s:currentPlayer", roomID)
-	if err := rdb.Set(ctx, currentPlayerKey, "", 0).Err(); err != nil {
+	// 2. 初始化当前操作玩家
+	err = ws.SetCurrentPlayer(repository.Rdb, repository.Ctx, roomID, "")
+	if err != nil {
+		log.Println("❌ 设置当前玩家失败:", err)
 		return "", err
 	}
 
