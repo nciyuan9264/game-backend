@@ -10,6 +10,6 @@ ENV GOPROXY=https://goproxy.cn,direct
 RUN go mod tidy
 RUN go build -o app main.go
 
-EXPOSE 8080
+EXPOSE 8000
 
 CMD ["./app"]
