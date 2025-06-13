@@ -6,8 +6,9 @@ type RoomStatus string
 
 // 玩家连接对象结构体
 type PlayerConn struct {
-	PlayerID string          // 玩家ID
-	Conn     *websocket.Conn // 连接对象
+	PlayerID string
+	Conn     *websocket.Conn
+	Online   bool // 新增：标记是否在线
 }
 
 const (

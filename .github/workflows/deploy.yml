@@ -1,0 +1,27 @@
+name: Deploy to Huaweiyun Server
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest  # 使用最新的 Ubuntu 环境运行
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2  # 检出代码
+
+      - name: Set up SSH key for Huaweiyun
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.HUAWEIYUN_SSH_KEY }}" > ~/.ssh/wzy.pem
+          chmod 600 ~/.ssh/wzy.pem
+          ssh-keyscan -H 120.46.74.14 >> ~/.ssh/known_hosts  # 添加阿里云服务器的公钥
+        env:
+          HUAWEIYUN_SSH_KEY: ${{ secrets.HUAWEIYUN_SSH_KEY }}  # 使用 GitHub Secrets
+
+      - name: Deploy to Huaweiyun
+        run: |
+          ssh -i ~/.ssh/wzy.pem root@120.46.74.14 "cd /home/game-backend && git pull && docker compose down && docker compose -f docker-compose.yml up -d --build"

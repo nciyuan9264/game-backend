@@ -6,6 +6,7 @@ import (
 	"go-game/dto"
 	"go-game/entities"
 	"go-game/repository"
+	"go-game/utils"
 	"log"
 	"sort"
 	"time"
@@ -29,7 +30,7 @@ func placeTile(rdb *redis.Client, ctx context.Context, roomID, playerID, tileKey
 	}
 
 	// Step 3: 保存刚刚放置的 tileKey
-	if err := saveCreateCompanyTileKey(rdb, ctx, roomID, playerID, tileKey); err != nil {
+	if err := SetLastTileKey(rdb, ctx, roomID, playerID, tileKey); err != nil {
 		return err
 	}
 
@@ -85,15 +86,15 @@ func handleMergeProcess(
 			currentCompanyHoders = append(currentCompanyHoders, holder.PlayerID)
 		}
 
+		stockInfo := utils.GetStockInfo(mainHotel, tileCount)
 		// Step 4：计算红利（根据 tileCount 和规则，这里举例用 100 * tileCount 为总红利）
-		totalBonus := tileCount * 100
-		firstBonus := totalBonus * 2 / 3
-		secondBonus := totalBonus / 3
+		firstBonus := stockInfo.BonusFirst
+		secondBonus := stockInfo.BonusSecond
 
 		dividends := make(map[string]int)
 
 		if len(holders) == 1 {
-			dividends[holders[0].PlayerID] = totalBonus
+			dividends[holders[0].PlayerID] = firstBonus
 		} else {
 			if holders[0].Count == holders[1].Count {
 				dividends[holders[0].PlayerID] = (firstBonus + secondBonus) / 2
@@ -145,27 +146,18 @@ func HandlePostTilePlacement(rdb *redis.Client, ctx context.Context, roomID, pla
 			if err := SetGameStatus(rdb, roomID, dto.RoomStatusBuyStock); err != nil {
 				return fmt.Errorf("更新房间状态失败: %w", err)
 			}
-			log.Println("✅ 切换为买股票阶段")
 			return nil
 		}
 	}
-
-	// 第三步：否则流程继续
-	log.Println("🟡 无可购买股票公司，开始发牌并切换玩家")
-
 	// 发一张 tile
-	if err := GiveRandomTileToPlayer(rdb, ctx, roomID, playerID); err != nil {
+	if err := GiveRandomTileToPlayer(rdb, repository.Ctx, roomID, playerID); err != nil {
 		return fmt.Errorf("发牌失败: %w", err)
 	}
 
 	// 切换玩家
-	if err := SwitchToNextPlayer(rdb, ctx, roomID, playerID); err != nil {
+	if err := SwitchToNextPlayer(rdb, repository.Ctx, roomID, playerID); err != nil {
 		log.Println("切换玩家失败:", err)
 	}
-
-	// 广播给前端
-	broadcastToRoom(roomID)
-
 	return nil
 }
 
@@ -209,7 +201,6 @@ func handleMergingLogic(rdb *redis.Client, roomID string, playerID string, hotel
 		if err != nil {
 			return err
 		}
-		broadcastToRoom(roomID)
 		return nil
 	} else {
 		// 只有一个最大的酒店
@@ -223,7 +214,6 @@ func handleMergingLogic(rdb *redis.Client, roomID string, playerID string, hotel
 		if err != nil {
 			return err
 		}
-		broadcastToRoom(roomID)
 	}
 	return nil
 }
@@ -317,9 +307,7 @@ func checkTileTriggerRules(rdb *redis.Client, roomID string, playerID string, ti
 		log.Println("⚠️ 触发创建公司规则！创建一个酒店:")
 		// Step 1: 修改房间状态为“创建公司状态”
 		SetGameStatus(rdb, roomID, dto.RoomStatusCreateCompany)
-		// Step 2: 发送消息同步到前端
-		broadcastToRoom(roomID)
-		return fmt.Errorf("触发创建公司规则")
+		return nil
 	}
 
 	err := HandlePostTilePlacement(repository.Rdb, repository.Ctx, roomID, playerID)
@@ -385,9 +373,8 @@ func handleMergingSelectionMessage(conn *websocket.Conn, rdb *redis.Client, room
 			maxCount = tileCount
 		}
 	}
-	otherHotel := make([]string, 0, len(mergeSelectionTemp.OtherCompany))
 
-	err = handleMergeProcess(rdb, roomID, maincompany, otherHotel, hotelTileCount)
+	err = handleMergeProcess(rdb, roomID, maincompany, mergeSelectionTemp.OtherCompany, hotelTileCount)
 	if err != nil {
 		log.Println("❌ 处理合并过程失败:", err)
 		return
@@ -470,32 +457,13 @@ func handleMergingSettleMessage(conn *websocket.Conn, rdb *redis.Client, roomID 
 				log.Printf("❌ 扣除玩家[%s]股票失败: %v\n", playerID, err)
 				return
 			}
-
-			companyData.StockTotal += sellAmount
-			companyInfo[item.Company] = companyData
 		}
 
 		if exchangeAmount > 0 {
-			// 修改 mergeMainCompany 的数据
-			mergeCompany := companyInfo[mergeMainCompany]
-			mergeCompany.StockTotal -= exchangeAmount / 2
-			companyInfo[mergeMainCompany] = mergeCompany
-
-			// 修改 item.Company 的数据
-			company := companyInfo[item.Company]
-			company.StockTotal += exchangeAmount
-			companyInfo[item.Company] = company
-
 			// 修改股票持仓
 			stockMap[mergeMainCompany] += exchangeAmount / 2
 			stockMap[item.Company] -= exchangeAmount
 		}
-	}
-
-	err = SetCompanyInfo(rdb, roomID, companyInfo)
-	if err != nil {
-		log.Printf("❌ 保存公司信息失败: %v\n", err)
-		return
 	}
 
 	err = SetPlayerStocks(rdb, repository.Ctx, roomID, playerID, stockMap)
@@ -527,7 +495,7 @@ func handleMergingSettleMessage(conn *websocket.Conn, rdb *redis.Client, roomID 
 		}
 	}
 
-	currentKey, err := getCreateCompanyTileKey(rdb, repository.Ctx, roomID)
+	currentKey, err := GetLastTileKey(rdb, repository.Ctx, roomID)
 	if err != nil {
 		log.Printf("❌ 获取当前创建公司 tile key 失败: %v\n", err)
 		return
@@ -585,7 +553,7 @@ func handleCreateCompanyMessage(conn *websocket.Conn, rdb *redis.Client, roomID 
 	log.Println("✅ 收到 create_company 消息，目标 company:", company)
 
 	// Step 1: 取出 createTileKey
-	createTileKey := fmt.Sprintf("room:%s:create_company_tile_temp", roomID)
+	createTileKey := fmt.Sprintf("room:%s:last_tile_key_temp", roomID)
 	tileKey, err := rdb.Get(repository.Ctx, createTileKey).Result()
 	if err != nil {
 		log.Println("❌ 获取 createTileKey 失败:", err)

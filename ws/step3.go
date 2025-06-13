@@ -17,7 +17,8 @@ func GiveRandomTileToPlayer(rdb *redis.Client, ctx context.Context, roomID, play
 	}
 
 	if len(allTiles) == 0 {
-		return fmt.Errorf("没有可用的 tiles")
+		log.Println("❌ 没有可用的 tiles")
+		return nil
 	}
 
 	rand.Shuffle(len(allTiles), func(i, j int) {

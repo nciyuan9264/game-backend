@@ -261,12 +261,3 @@ func SetAllRoomTiles(rdb *redis.Client, roomID string, tiles map[string]dto.Tile
 	}
 	return nil
 }
-
-func SetCurrentStep(rdb *redis.Client, ctx context.Context, roomID, step string) error {
-	key := fmt.Sprintf("room:%s:currentStep", roomID)
-	if err := rdb.Set(ctx, key, step, 0).Err(); err != nil {
-		log.Printf("❌ 设置当前步骤失败 roomID=%s step=%s: %v\n", roomID, step, err)
-		return err
-	}
-	return nil
-}
