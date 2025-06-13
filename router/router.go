@@ -9,7 +9,7 @@ import (
 
 func InitRouter(r *gin.Engine) {
 	// 游戏接口路由
-	api := r.Group("/room")
+	api := r.Group("/api/room")
 	{
 		api.POST("/create", controller.CreateRoom)
 		api.GET("/list", controller.GetRoomList) // ✅ 新增这一行
