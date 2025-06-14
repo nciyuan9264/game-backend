@@ -525,7 +525,29 @@ func handleMergingSettleMessage(conn *websocket.Conn, rdb *redis.Client, roomID 
 	}
 
 	if allHodersCleared {
-		err := SetGameStatus(rdb, roomID, dto.RoomStatusBuyStock)
+		lastTile, err := GetLastTileKey(rdb, repository.Ctx, roomID)
+		if err != nil {
+			log.Printf("❌ 获取最后一个 tile key 失败: %v\n", err)
+			return
+		}
+		adj := getAdjacentTileKeys(lastTile)
+		for _, key := range adj {
+			tile, err := GetTileFromRedis(rdb, repository.Ctx, roomID, key)
+			if err != nil {
+				log.Printf("❌ 获取 tileBelong 失败: %v\n", err)
+				return
+			}
+			if tile.Belong == "Blank" {
+				tile.Belong = mergeMainCompany
+				err = UpdateTileValue(rdb, roomID, key, tile)
+				if err != nil {
+					log.Printf("❌ 更新 tileBelong 失败: %v\n", err)
+					return
+				}
+			}
+		}
+
+		err = SetGameStatus(rdb, roomID, dto.RoomStatusBuyStock)
 		if err != nil {
 			log.Printf("❌ 设置游戏状态失败: %v\n", err)
 			return

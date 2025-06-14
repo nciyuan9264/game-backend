@@ -120,6 +120,9 @@ func GetCurrentPlayer(rdb *redis.Client, ctx context.Context, roomID string) (st
 	key := fmt.Sprintf("room:%s:currentPlayer", roomID)
 	playerID, err := rdb.Get(ctx, key).Result()
 	if err != nil {
+		if err == redis.Nil {
+			return "", nil
+		}
 		return "", fmt.Errorf("获取当前玩家失败: %w", err)
 	}
 	return playerID, nil
