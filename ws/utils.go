@@ -3,6 +3,7 @@ package ws
 import (
 	"fmt"
 	"go-game/dto"
+	"go-game/entities"
 	"go-game/repository"
 	"log"
 	"net/http"
@@ -172,4 +173,17 @@ func removeAtIndex(slice []string, index int) []string {
 		return slice // 越界则不修改
 	}
 	return append(slice[:index], slice[index+1:]...)
+}
+
+func CalculateTotalValue(playerStocks map[string]int, companyInfoMap map[string]entities.CompanyInfo) int {
+	totalValue := 0
+	for company, count := range playerStocks {
+		companyInfo, ok := companyInfoMap[company]
+		if !ok {
+			log.Printf("无法找到公司信息: %s\n", company)
+			continue
+		}
+		totalValue += count * companyInfo.StockPrice
+	}
+	return totalValue
 }

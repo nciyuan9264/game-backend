@@ -12,6 +12,10 @@ type RoomInfo struct {
 	RoomPlayer []RoomPlayer `json:"roomPlayer"`
 }
 
+type PlayerInfo struct {
+	Money int `json:"money"`
+}
+
 type CreateRoomRequest struct {
 	MaxPlayers int    `json:"maxPlayers" binding:"required"`
 	UserID     string `json:"userID" binding:"required"`

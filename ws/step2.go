@@ -55,14 +55,12 @@ func UpdateCompanyStockAndTiles(rdb *redis.Client, roomID string, company string
 // UpdatePlayerStockAndMoney 更新玩家数据
 func UpdatePlayerStockAndMoney(rdb *redis.Client, ctx context.Context, roomID string, playerID string, company string, stockCount int, totalPrice int) error {
 	// 获取当前金额
-	moneyStr, err := GetPlayerInfoField(rdb, ctx, roomID, playerID, "money")
+	playerInfo, err := GetPlayerInfoField(rdb, ctx, roomID, playerID, "money")
 	if err != nil {
 		return fmt.Errorf("获取玩家金额失败: %w", err)
 	}
-	money, err := strconv.Atoi(moneyStr)
-	if err != nil {
-		return fmt.Errorf("金额转换失败: %w", err)
-	}
+	money := playerInfo.Money
+
 	if money < totalPrice {
 		return fmt.Errorf("余额不足，购买失败")
 	}

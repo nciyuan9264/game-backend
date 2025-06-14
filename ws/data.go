@@ -44,13 +44,22 @@ func DeductPlayerMoney(rdb *redis.Client, ctx context.Context, roomID, playerID 
 	}
 	return AddPlayerMoney(rdb, ctx, roomID, playerID, -amount)
 }
-func GetPlayerInfoField(rdb *redis.Client, ctx context.Context, roomID, playerID, field string) (string, error) {
+func GetPlayerInfoField(rdb *redis.Client, ctx context.Context, roomID, playerID, field string) (dto.PlayerInfo, error) {
 	playerInfoKey := fmt.Sprintf("room:%s:player:%s:info", roomID, playerID)
 	value, err := rdb.HGet(ctx, playerInfoKey, field).Result()
 	if err != nil {
-		return "", err
+		return dto.PlayerInfo{}, err
 	}
-	return value, nil
+	if field == "money" {
+		intVal, convErr := strconv.Atoi(value)
+		if convErr != nil {
+			return dto.PlayerInfo{}, convErr
+		}
+		return dto.PlayerInfo{
+			Money: intVal,
+		}, nil // 重新格式化输出（可选）
+	}
+	return dto.PlayerInfo{}, nil
 }
 
 // 将玩家的牌组批量写入 Redis 列表（尾部追加）

@@ -20,8 +20,12 @@ import (
 var Rooms = make(map[string][]dto.PlayerConn)
 var roomLock sync.Mutex
 
-// 广播消息给房间内所有连接成功的玩家
 func broadcastToRoom(roomID string) {
+	broadcastToRoomDefault(roomID, false) // 默认 end 为 false
+}
+
+// 广播消息给房间内所有连接成功的玩家
+func broadcastToRoomDefault(roomID string, end bool) {
 	companyInfoMap, err := GetCompanyInfo(repository.Rdb, roomID)
 	if err != nil {
 		log.Println("获取公司信息失败:", err)
@@ -67,10 +71,28 @@ func broadcastToRoom(roomID string) {
 		return
 	}
 
+	result := make(map[string]int)
+	for _, pc := range Rooms[roomID] {
+		if pc.Online {
+			playerStocks, err := GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, pc.PlayerID)
+			if err != nil {
+				log.Printf("❌ 获取玩家[%s]股票失败: %v\n", pc.PlayerID, err)
+				continue
+			}
+			playerInfo, err := GetPlayerInfoField(repository.Rdb, repository.Ctx, roomID, pc.PlayerID, "money")
+			if err != nil {
+				log.Printf("❌ 获取玩家[%s]金钱失败: %v\n", pc.PlayerID, err)
+				continue
+			}
+
+			result[pc.PlayerID] = CalculateTotalValue(playerStocks, companyInfoMap) + playerInfo.Money
+		}
+	}
+
 	for _, pc := range Rooms[roomID] {
 		if pc.Online {
 			// 尝试发送消息
-			if err := SyncRoomMessage(pc.Conn, roomID, pc.PlayerID); err != nil {
+			if err := SyncRoomMessage(pc.Conn, roomID, pc.PlayerID, result); err != nil {
 				log.Println("广播失败，移除连接:", pc.PlayerID)
 				pc.Conn.Close()
 			}
@@ -114,7 +136,7 @@ func SwitchToNextPlayer(rdb *redis.Client, ctx context.Context, roomID, currentI
 }
 
 // 向该客户端发送同步消息
-func SyncRoomMessage(conn *websocket.Conn, roomID string, playerID string) error {
+func SyncRoomMessage(conn *websocket.Conn, roomID string, playerID string, result map[string]int) error {
 	rdb := repository.Rdb
 	ctx := repository.Ctx
 
@@ -197,6 +219,7 @@ func SyncRoomMessage(conn *websocket.Conn, roomID string, playerID string) error
 	// ------- 组装消息 -------
 	msg := map[string]interface{}{
 		"type":     "sync",
+		"result":   result,
 		"playerId": playerID,
 		"playerData": map[string]interface{}{
 			"info":   info,
@@ -270,6 +293,7 @@ var messageHandlers = map[string]messageHandler{
 	"merging_settle":    handleMergingSettleMessage,
 	"buy_stock":         handleBuyStockMessage,
 	"merging_selection": handleMergingSelectionMessage,
+	"game_end":          handleGameEndMessage,
 }
 
 // 持续监听客户端消息，并将其广播给房间内其他玩家
