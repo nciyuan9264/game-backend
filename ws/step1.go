@@ -190,6 +190,20 @@ func handleMergingLogic(rdb *redis.Client, roomID string, playerID string, hotel
 			delete(hotelSet, hotel)
 		}
 		otherHotel := make([]string, 0, len(hotelSet))
+		for key := range hotelSet {
+			if companyInfo[key].Tiles >= 11 {
+				continue
+			}
+			otherHotel = append(otherHotel, key)
+		}
+		if len(otherHotel) == 0 && maxCount >= 11 {
+			err = SetGameStatus(rdb, roomID, dto.RoomStatusBuyStock)
+			if err != nil {
+				log.Println("❌ 设置房间状态失败:", err)
+			}
+			log.Println("没有其他可以合并的公司")
+			return nil
+		}
 		err = SetMergingSelection(rdb, repository.Ctx, roomID, entities.MergingSelection{
 			MainCompany:  topHotels,
 			OtherCompany: otherHotel,
@@ -208,7 +222,18 @@ func handleMergingLogic(rdb *redis.Client, roomID string, playerID string, hotel
 		delete(hotelSet, mainHotel)
 		var otherHotel []string
 		for key := range hotelSet {
+			if companyInfo[key].Tiles >= 11 {
+				continue
+			}
 			otherHotel = append(otherHotel, key)
+		}
+		if len(otherHotel) == 0 {
+			err = SetGameStatus(rdb, roomID, dto.RoomStatusBuyStock)
+			if err != nil {
+				log.Println("❌ 设置房间状态失败:", err)
+			}
+			log.Println("没有其他可以合并的公司")
+			return nil
 		}
 		err = handleMergeProcess(rdb, roomID, mainHotel, otherHotel, hotelTileCount)
 		if err != nil {
@@ -365,8 +390,13 @@ func handleMergingSelectionMessage(conn *websocket.Conn, rdb *redis.Client, room
 
 	hotelTileCount := make(map[string]int)
 	maxCount := 0
-	for _, hotel := range mergeSelectionTemp.OtherCompany {
+	for i := len(mergeSelectionTemp.OtherCompany) - 1; i >= 0; i-- {
+		hotel := mergeSelectionTemp.OtherCompany[i]
 		info := companyInfo[hotel]
+		if info.Tiles >= 11 {
+			mergeSelectionTemp.OtherCompany = removeAtIndex(mergeSelectionTemp.OtherCompany, i)
+			continue
+		}
 		tileCount := info.Tiles
 		hotelTileCount[hotel] = tileCount
 		if tileCount > maxCount {
@@ -495,37 +525,35 @@ func handleMergingSettleMessage(conn *websocket.Conn, rdb *redis.Client, roomID 
 		}
 	}
 
-	currentKey, err := GetLastTileKey(rdb, repository.Ctx, roomID)
-	if err != nil {
-		log.Printf("❌ 获取当前创建公司 tile key 失败: %v\n", err)
-		return
-	}
-
-	tileMap, err := GetAllRoomTiles(rdb, roomID)
-	if err != nil {
-		log.Printf("❌ 获取房间 tile 信息失败: %v\n", err)
-		return
-	}
-
-	for key, tile := range tileMap {
-		if _, ok := mergeSettleData[tile.Belong]; ok {
-			tile.Belong = mergeMainCompany
-			tileMap[key] = tile
-		}
-		if tile.ID == currentKey {
-			tile.Belong = mergeMainCompany
-			tileMap[key] = tile
-		}
-	}
-
-	err = SetAllRoomTiles(rdb, roomID, tileMap)
-	if err != nil {
-		log.Printf("❌ 保存房间 tile 信息失败: %v\n", err)
-		return
-	}
-
 	if allHodersCleared {
 		lastTile, err := GetLastTileKey(rdb, repository.Ctx, roomID)
+		if err != nil {
+			log.Printf("❌ 获取当前创建公司 tile key 失败: %v\n", err)
+			return
+		}
+
+		tileMap, err := GetAllRoomTiles(rdb, roomID)
+		if err != nil {
+			log.Printf("❌ 获取房间 tile 信息失败: %v\n", err)
+			return
+		}
+
+		for key, tile := range tileMap {
+			if _, ok := mergeSettleData[tile.Belong]; ok {
+				tile.Belong = mergeMainCompany
+				tileMap[key] = tile
+			}
+			if tile.ID == lastTile {
+				tile.Belong = mergeMainCompany
+				tileMap[key] = tile
+			}
+		}
+
+		err = SetAllRoomTiles(rdb, roomID, tileMap)
+		if err != nil {
+			log.Printf("❌ 保存房间 tile 信息失败: %v\n", err)
+			return
+		}
 		if err != nil {
 			log.Printf("❌ 获取最后一个 tile key 失败: %v\n", err)
 			return

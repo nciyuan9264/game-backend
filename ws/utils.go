@@ -166,3 +166,10 @@ func getAdjacentTileKeys(tileKey string) []string {
 
 	return adjacent
 }
+
+func removeAtIndex(slice []string, index int) []string {
+	if index < 0 || index >= len(slice) {
+		return slice // 越界则不修改
+	}
+	return append(slice[:index], slice[index+1:]...)
+}
