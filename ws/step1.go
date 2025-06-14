@@ -552,6 +552,12 @@ func handleMergingSettleMessage(conn *websocket.Conn, rdb *redis.Client, roomID 
 			return
 		}
 
+		connTile := getConnectedTiles(rdb, roomID, lastTile)
+		connTileSet := make(map[string]struct{})
+		for _, id := range connTile {
+			connTileSet[id] = struct{}{}
+		}
+
 		tileMap, err := GetAllRoomTiles(rdb, roomID)
 		if err != nil {
 			log.Printf("❌ 获取房间 tile 信息失败: %v\n", err)
@@ -564,6 +570,10 @@ func handleMergingSettleMessage(conn *websocket.Conn, rdb *redis.Client, roomID 
 				tileMap[key] = tile
 			}
 			if tile.ID == lastTile {
+				tile.Belong = mergeMainCompany
+				tileMap[key] = tile
+			}
+			if _, ok := connTileSet[tile.ID]; ok {
 				tile.Belong = mergeMainCompany
 				tileMap[key] = tile
 			}
