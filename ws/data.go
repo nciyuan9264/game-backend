@@ -151,7 +151,7 @@ func GetRoomInfo(rdb *redis.Client, roomID string) (*entities.RoomInfo, error) {
 	}
 	roomInfo.RoomStatus = roomStatus
 	roomInfo.GameStatus = dto.RoomStatus(roomInfoMap["gameStatus"])
-
+	roomInfo.UserID = roomInfoMap["userID"]
 	// 字符串转 int
 	maxPlayersStr := roomInfoMap["maxPlayers"]
 	if maxPlayersStr != "" {

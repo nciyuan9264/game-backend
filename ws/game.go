@@ -17,7 +17,7 @@ import (
 )
 
 // 房间内的所有连接（简化版）
-var rooms = make(map[string][]dto.PlayerConn)
+var Rooms = make(map[string][]dto.PlayerConn)
 var roomLock sync.Mutex
 
 // 广播消息给房间内所有连接成功的玩家
@@ -41,7 +41,7 @@ func broadcastToRoom(roomID string) {
 	}
 
 	allStockMap := make(map[string]int)
-	for _, pc := range rooms[roomID] {
+	for _, pc := range Rooms[roomID] {
 		stockMap, err := GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, pc.PlayerID)
 		if err != nil {
 			log.Printf("❌ 获取玩家[%s]股票失败: %v\n", pc.PlayerID, err)
@@ -67,7 +67,7 @@ func broadcastToRoom(roomID string) {
 		return
 	}
 
-	for _, pc := range rooms[roomID] {
+	for _, pc := range Rooms[roomID] {
 		if pc.Online {
 			// 尝试发送消息
 			if err := SyncRoomMessage(pc.Conn, roomID, pc.PlayerID); err != nil {
@@ -82,7 +82,7 @@ func SwitchToNextPlayer(rdb *redis.Client, ctx context.Context, roomID, currentI
 	roomLock.Lock()
 	defer roomLock.Unlock()
 
-	players, ok := rooms[roomID]
+	players, ok := Rooms[roomID]
 	if !ok || len(players) == 0 {
 		return fmt.Errorf("房间 %s 没有玩家", roomID)
 	}
@@ -230,7 +230,7 @@ func SyncRoomMessage(conn *websocket.Conn, roomID string, playerID string) error
 func getRoomPlayerCount(roomID string) int {
 	roomLock.Lock()
 	defer roomLock.Unlock()
-	return len(rooms[roomID])
+	return len(Rooms[roomID])
 }
 
 // 玩家断开连接后，从房间中移除该连接
@@ -239,11 +239,11 @@ func cleanupOnDisconnect(roomID, playerID string, conn *websocket.Conn) {
 	defer roomLock.Unlock()
 
 	// 遍历查找玩家，并标记为离线
-	for i, pc := range rooms[roomID] {
+	for i, pc := range Rooms[roomID] {
 		if pc.PlayerID == playerID {
 			if pc.Conn == conn {
-				rooms[roomID][i].Online = false
-				rooms[roomID][i].Conn = nil // 连接置空，方便回收
+				Rooms[roomID][i].Online = false
+				Rooms[roomID][i].Conn = nil // 连接置空，方便回收
 				log.Printf("玩家 %s 标记为离线\n", playerID)
 			}
 			break
@@ -355,7 +355,7 @@ func handleReadyMessage(conn *websocket.Conn, rdb *redis.Client, roomID, playerI
 			return
 		}
 		if playerID == "" {
-			randomPlayerID := rooms[roomID][rand.Intn(maxPlayers)]
+			randomPlayerID := Rooms[roomID][rand.Intn(maxPlayers)]
 			err := SetCurrentPlayer(repository.Rdb, repository.Ctx, roomID, randomPlayerID.PlayerID)
 			if err != nil {
 				log.Println("❌ 设置当前玩家失败:", err)

@@ -25,7 +25,7 @@ func generateAvailableTiles(roomID string) ([]string, error) {
 	}
 
 	playerTiles := make(map[string]struct{})
-	for _, pc := range rooms[roomID] {
+	for _, pc := range Rooms[roomID] {
 		tiles, err := GetPlayerTiles(rdb, ctx, roomID, pc.PlayerID)
 		if err != nil {
 			log.Printf("❌ 获取玩家 %s 的 tiles 失败: %v\n", pc.PlayerID, err)

@@ -59,7 +59,7 @@ func handleMergeProcess(
 		}
 		var holders []holder
 
-		for _, pc := range rooms[roomID] {
+		for _, pc := range Rooms[roomID] {
 			playerID := pc.PlayerID
 			// 获取该玩家所有股票
 			stockMap, err := GetPlayerStocks(rdb, repository.Ctx, roomID, playerID)

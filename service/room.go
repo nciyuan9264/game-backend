@@ -7,7 +7,6 @@ import (
 	"go-game/entities"
 	"go-game/repository"
 	"go-game/ws"
-	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -108,6 +107,7 @@ func CreateRoom(params dto.CreateRoomRequest) (string, error) {
 		return "", fmt.Errorf("tile 初始化 Redis 写入失败: %w", err)
 	}
 
+	ws.Rooms[roomID] = []dto.PlayerConn{}
 	return roomID, nil
 }
 
@@ -140,49 +140,33 @@ func DeleteRoom(params dto.DeleteRoomRequest) error {
 	if _, err := rdb.Del(ctx, keysToDelete...).Result(); err != nil {
 		return fmt.Errorf("删除房间相关 key 失败: %w", err)
 	}
+	delete(ws.Rooms, params.RoomID)
 
 	return nil
 }
 
 func GetRoomList() ([]dto.RoomInfo, error) {
-	ctx := repository.Ctx
 	rdb := repository.Rdb
-
-	// 获取所有房间 key（匹配 room:*:info）
-	keys, err := rdb.Keys(ctx, "room:*:roomInfo").Result()
-	if err != nil {
-		return nil, err
-	}
-
 	var rooms []dto.RoomInfo
-
-	for _, key := range keys {
-		// 获取 roomId（从 key 中提取）
-		// key 格式：room:<roomID>:info
-		parts := strings.Split(key, ":")
-		if len(parts) < 3 {
-			continue
+	for roomID, roomConnInfo := range ws.Rooms {
+		roomPlayers := make([]dto.RoomPlayer, 0, len(roomConnInfo))
+		for _, player := range roomConnInfo {
+			roomPlayers = append(roomPlayers, dto.RoomPlayer{
+				PlayerID: player.PlayerID,
+				Online:   player.Online,
+			})
 		}
-		roomID := parts[1]
 
-		// 获取 room 的 hash 数据
-		data, err := rdb.HGetAll(ctx, key).Result()
+		roomInfo, err := ws.GetRoomInfo(rdb, roomID)
 		if err != nil {
 			continue
 		}
-
-		maxPlayers, _ := strconv.Atoi(data["maxPlayers"])
-		roomStatus, err := strconv.ParseBool(data["roomStatus"])
-		if err != nil {
-			continue
-		}
-		userID := data["userID"]
-
 		room := dto.RoomInfo{
 			RoomID:     roomID,
-			UserID:     userID,
-			MaxPlayers: maxPlayers,
-			Status:     roomStatus,
+			UserID:     roomInfo.UserID,
+			MaxPlayers: roomInfo.MaxPlayers,
+			Status:     roomInfo.RoomStatus,
+			RoomPlayer: roomPlayers,
 		}
 		rooms = append(rooms, room)
 	}

@@ -23,7 +23,7 @@ func CreateRoom(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"status_code": http.StatusOK,
-		"msg":         "房间创建成功",
+		"message":     "房间创建成功",
 		"data": dto.CreateRoomResponse{
 			Room_id: roomID,
 		},
@@ -43,7 +43,7 @@ func DeleteRoom(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"status_code": http.StatusOK,
-		"msg":         "房间删除成功",
+		"message":     "房间删除成功",
 	})
 }
 

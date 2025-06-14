@@ -16,38 +16,23 @@ func validateAndJoinRoom(roomID, playerID string, conn *websocket.Conn) bool {
 		return false
 	}
 	maxPlayers := roomInfo.MaxPlayers
-	if rooms[roomID] == nil {
-		rooms[roomID] = []dto.PlayerConn{}
-	}
 
 	// 查找玩家是否已经在房间中（包括掉线状态）
-	for i, pc := range rooms[roomID] {
+	for i, pc := range Rooms[roomID] {
 		if pc.PlayerID == playerID {
-			// 处理断线重连
-			if pc.Conn != nil && pc.Conn != conn {
-				// 关闭旧连接（可选）
-				// pc.Conn.Close()
-			}
-			rooms[roomID][i].Conn = conn
-			rooms[roomID][i].Online = true
+			Rooms[roomID][i].Conn = conn
+			Rooms[roomID][i].Online = true
 			log.Printf("玩家 %s 重连成功\n", playerID)
 			return true
 		}
 	}
 
-	// 如果房间人数已满，不允许新玩家加入（只计算有效连接）
-	activeCount := 0
-	for _, pc := range rooms[roomID] {
-		if pc.Online {
-			activeCount++
-		}
-	}
-	if activeCount >= maxPlayers {
+	if len(Rooms[roomID]) >= maxPlayers {
 		return false
 	}
 
 	// 添加新玩家
-	rooms[roomID] = append(rooms[roomID], dto.PlayerConn{
+	Rooms[roomID] = append(Rooms[roomID], dto.PlayerConn{
 		PlayerID: playerID,
 		Conn:     conn,
 		Online:   true,

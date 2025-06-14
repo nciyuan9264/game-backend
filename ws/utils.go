@@ -120,7 +120,7 @@ func stringToIntHookFunc() mapstructure.DecodeHookFunc {
 
 // GetConn 用于根据 roomID 和 playerID 获取对应的 WebSocket 连接
 func GetConn(roomID string, playerID string) (*websocket.Conn, error) {
-	players, ok := rooms[roomID]
+	players, ok := Rooms[roomID]
 	if !ok {
 		return nil, fmt.Errorf("房间[%s]不存在", roomID)
 	}
