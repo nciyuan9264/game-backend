@@ -329,6 +329,26 @@ func checkTileTriggerRules(rdb *redis.Client, roomID string, playerID string, ti
 	}
 
 	if blankTileCount >= 1 {
+		companyInfo, err := GetCompanyInfo(rdb, roomID)
+		if err != nil {
+			return fmt.Errorf("获取公司信息失败: %w", err)
+		}
+		flag := false
+		for _, info := range companyInfo {
+			if info.Tiles == 0 {
+				flag = true
+				break
+			}
+		}
+		if !flag {
+			err = SetGameStatus(rdb, roomID, dto.RoomStatusBuyStock)
+			if err != nil {
+				log.Println("❌ 设置房间状态失败:", err)
+			}
+			log.Println("没有可以创建的公司")
+			return nil
+		}
+
 		log.Println("⚠️ 触发创建公司规则！创建一个酒店:")
 		// Step 1: 修改房间状态为“创建公司状态”
 		SetGameStatus(rdb, roomID, dto.RoomStatusCreateCompany)

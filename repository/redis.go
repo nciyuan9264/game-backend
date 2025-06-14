@@ -4,6 +4,7 @@ package repository
 import (
 	"context"
 	"log"
+	"os"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -14,10 +15,14 @@ var (
 )
 
 func InitRedis() {
+	addr := os.Getenv("REDIS_ADDR")
+	if addr == "" {
+		addr = "localhost:6379"
+	}
 	Rdb = redis.NewClient(&redis.Options{
-		Addr:     "redis:6379", // Redis 地址（Docker 里用服务名或内网IP）
-		Password: "",           // 如果有密码，写在这里
-		DB:       0,            // 默认使用 0 号数据库
+		Addr:     addr, // Redis 地址（Docker 里用服务名或内网IP）
+		Password: "",   // 如果有密码，写在这里
+		DB:       0,    // 默认使用 0 号数据库
 	})
 
 	_, err := Rdb.Ping(Ctx).Result()
