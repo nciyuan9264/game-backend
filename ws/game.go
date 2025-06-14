@@ -253,7 +253,13 @@ func SyncRoomMessage(conn *websocket.Conn, roomID string, playerID string, resul
 func getRoomPlayerCount(roomID string) int {
 	roomLock.Lock()
 	defer roomLock.Unlock()
-	return len(Rooms[roomID])
+	onLineCount := 0
+	for _, pc := range Rooms[roomID] {
+		if pc.Online {
+			onLineCount++
+		}
+	}
+	return onLineCount
 }
 
 // 玩家断开连接后，从房间中移除该连接
