@@ -174,6 +174,7 @@ func SetRoomInfo(rdb *redis.Client, ctx context.Context, roomID string, info ent
 		"gameStatus": string(info.GameStatus),
 		"roomStatus": roomStatus,
 		"maxPlayers": strconv.Itoa(info.MaxPlayers),
+		"userID":     info.UserID,
 	}
 
 	if err := rdb.HSet(ctx, roomKey, data).Err(); err != nil {

@@ -7,29 +7,13 @@ import (
 	"go-game/entities"
 	"go-game/repository"
 	"go-game/ws"
-	"log"
 	"strconv"
 	"strings"
 
-	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 )
 
-func GetTile(rdb *redis.Client, roomID, tileID string) (*dto.Tile, error) {
-	ctx := repository.Ctx
-	key := fmt.Sprintf("room:%s:tiles", roomID)
-	result, err := rdb.HGet(ctx, key, tileID).Result()
-	if err != nil {
-		return nil, err
-	}
-	var tile dto.Tile
-	if err := json.Unmarshal([]byte(result), &tile); err != nil {
-		return nil, err
-	}
-	return &tile, nil
-}
-
-func CreateRoom(maxPlayers int) (string, error) {
+func CreateRoom(params dto.CreateRoomRequest) (string, error) {
 	ctx := repository.Ctx
 	rdb := repository.Rdb
 
@@ -39,9 +23,10 @@ func CreateRoom(maxPlayers int) (string, error) {
 
 	// 初始化房间信息
 	err := ws.SetRoomInfo(rdb, repository.Ctx, roomID, entities.RoomInfo{
-		MaxPlayers: maxPlayers,
+		MaxPlayers: params.MaxPlayers,
 		GameStatus: dto.RoomStatusSetTile,
 		RoomStatus: false,
+		UserID:     params.UserID,
 	})
 	if err != nil {
 		return "", fmt.Errorf("初始化房间信息失败: %w", err)
@@ -51,51 +36,44 @@ func CreateRoom(maxPlayers int) (string, error) {
 		"Sackson": {
 			"name":       "Sackson",
 			"stockTotal": 25,
-			"tiles":      0,    // 初始数量
-			"stockPrice": 200,  // 初始参考股价（可调整）
-			"valuation":  5000, // 初始估值
+			"tiles":      0,   // 初始数量
+			"stockPrice": 200, // 初始参考股价（可调整）
 		},
 		"Tower": {
 			"name":       "Tower",
 			"tiles":      0, // 初始数量
 			"stockTotal": 25,
 			"stockPrice": 200,
-			"valuation":  5000,
 		},
 		"American": {
 			"name":       "American",
 			"tiles":      0, // 初始数量
 			"stockTotal": 25,
 			"stockPrice": 200,
-			"valuation":  5000,
 		},
 		"Festival": {
 			"name":       "Festival",
 			"tiles":      0, // 初始数量
 			"stockTotal": 25,
 			"stockPrice": 200,
-			"valuation":  5000,
 		},
 		"Worldwide": {
 			"name":       "Worldwide",
 			"tiles":      0, // 初始数量
 			"stockTotal": 25,
 			"stockPrice": 200,
-			"valuation":  5000,
 		},
 		"Continental": {
 			"name":       "Continental",
 			"tiles":      0, // 初始数量
 			"stockTotal": 25,
 			"stockPrice": 200,
-			"valuation":  5000,
 		},
 		"Imperial": {
 			"name":       "Imperial",
 			"tiles":      0, // 初始数量
 			"stockTotal": 25,
 			"stockPrice": 200,
-			"valuation":  5000,
 		},
 	}
 
@@ -130,20 +108,40 @@ func CreateRoom(maxPlayers int) (string, error) {
 		return "", fmt.Errorf("tile 初始化 Redis 写入失败: %w", err)
 	}
 
-	// 2. 初始化当前操作玩家
-	err = ws.SetCurrentPlayer(repository.Rdb, repository.Ctx, roomID, "")
-	if err != nil {
-		log.Println("❌ 设置当前玩家失败:", err)
-		return "", err
-	}
-
-	// 3. 初始化当前玩家操作步数（从0开始）
-	currentStepKey := fmt.Sprintf("room:%s:currentStep", roomID)
-	if err := rdb.Set(ctx, currentStepKey, 0, 0).Err(); err != nil {
-		return "", err
-	}
-
 	return roomID, nil
+}
+
+func DeleteRoom(params dto.DeleteRoomRequest) error {
+	ctx := repository.Ctx
+	rdb := repository.Rdb
+
+	// 用 SCAN 查找所有以 room:{RoomID}: 开头的 key
+	prefix := fmt.Sprintf("room:%s:", params.RoomID)
+	var cursor uint64
+	var keysToDelete []string
+
+	for {
+		keys, cur, err := rdb.Scan(ctx, cursor, prefix+"*", 100).Result()
+		if err != nil {
+			return fmt.Errorf("扫描房间相关 key 失败: %w", err)
+		}
+		keysToDelete = append(keysToDelete, keys...)
+		cursor = cur
+		if cursor == 0 {
+			break
+		}
+	}
+
+	if len(keysToDelete) == 0 {
+		return fmt.Errorf("房间不存在或无相关数据")
+	}
+
+	// 批量删除这些 key
+	if _, err := rdb.Del(ctx, keysToDelete...).Result(); err != nil {
+		return fmt.Errorf("删除房间相关 key 失败: %w", err)
+	}
+
+	return nil
 }
 
 func GetRoomList() ([]dto.RoomInfo, error) {
@@ -174,33 +172,20 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 		}
 
 		maxPlayers, _ := strconv.Atoi(data["maxPlayers"])
-		status := data["status"]
+		roomStatus, err := strconv.ParseBool(data["roomStatus"])
+		if err != nil {
+			continue
+		}
+		userID := data["userID"]
 
 		room := dto.RoomInfo{
 			RoomID:     roomID,
+			UserID:     userID,
 			MaxPlayers: maxPlayers,
-			Status:     status,
+			Status:     roomStatus,
 		}
 		rooms = append(rooms, room)
 	}
 
 	return rooms, nil
 }
-
-// func JoinRoom(roomID, playerID string) error {
-// 	// 1. 检查房间状态，比如是否已满
-// 	if IsRoomFull(roomID) {
-// 		return errors.New("房间已满")
-// 	}
-// 	// 2. 将玩家加入房间
-// 	err := AddPlayerToRoom(roomID, playerID)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	// 3. 其他业务逻辑，比如恢复玩家数据等
-// 	return nil
-// }
-
-// func AddPlayerToRoom(roomID, playerID string) any {
-// 	panic("unimplemented")
-// }

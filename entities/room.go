@@ -18,4 +18,5 @@ type RoomInfo struct {
 	RoomStatus bool           `json:"roomStatus"`
 	GameStatus dto.RoomStatus `json:"gameStatus"`
 	MaxPlayers int            `json:"maxPlayers"`
+	UserID     string         `json:"userID"`
 }

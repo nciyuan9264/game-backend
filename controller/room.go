@@ -15,7 +15,7 @@ func CreateRoom(c *gin.Context) {
 		return
 	}
 
-	roomID, err := service.CreateRoom(req.MaxPlayers)
+	roomID, err := service.CreateRoom(req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -27,6 +27,23 @@ func CreateRoom(c *gin.Context) {
 		"data": dto.CreateRoomResponse{
 			Room_id: roomID,
 		},
+	})
+}
+
+func DeleteRoom(c *gin.Context) {
+	var req dto.DeleteRoomRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少必要字段"})
+		return
+	}
+	err := service.DeleteRoom(req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status_code": http.StatusOK,
+		"msg":         "房间删除成功",
 	})
 }
 
@@ -45,16 +62,3 @@ func GetRoomList(c *gin.Context) {
 		},
 	})
 }
-
-// func JoinRoom(c *gin.Context) {
-// 	roomID := c.Query("roomID")
-// 	playerID := c.Query("playerId")
-
-// 	err := service.JoinRoom(roomID, playerID)
-// 	if err != nil {
-// 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-// 		return
-// 	}
-
-// 	c.JSON(http.StatusOK, gin.H{"message": "加入成功"})
-// }

@@ -2,12 +2,18 @@ package dto
 
 type RoomInfo struct {
 	RoomID     string `json:"roomID"`
+	UserID     string `json:"userID"`
 	MaxPlayers int    `json:"maxPlayers"`
-	Status     string `json:"status"`
+	Status     bool   `json:"status"`
 }
 
 type CreateRoomRequest struct {
-	MaxPlayers int `json:"maxPlayers" binding:"required"`
+	MaxPlayers int    `json:"maxPlayers" binding:"required"`
+	UserID     string `json:"userID" binding:"required"`
+}
+
+type DeleteRoomRequest struct {
+	RoomID string `json:"roomID" binding:"required"`
 }
 
 type CreateRoomResponse struct {
