@@ -342,9 +342,9 @@ func HandleWebSocket(c *gin.Context) {
 		return
 	}
 	// 获取玩家 ID（从前端传来的 userId）
-	playerID := c.Query("userId")
+	playerID := c.Query("userID")
 	if playerID == "" {
-		log.Println("缺少 userId")
+		log.Println("缺少 userID")
 		return
 	}
 
