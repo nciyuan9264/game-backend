@@ -182,9 +182,9 @@ func SyncRoomMessage(conn *websocket.Conn, roomID string, playerID string, resul
 		return fmt.Errorf("❌ 获取公司信息 pipeline 执行失败: %w", err)
 	}
 
-	companyInfo := make(map[string]map[string]string)
-	for companyID, cmd := range companyCmds {
-		companyInfo[companyID] = cmd.Val()
+	companyInfo, err := GetCompanyInfo(rdb, roomID)
+	if err != nil {
+		return fmt.Errorf("❌ 获取公司信息失败: %w", err)
 	}
 
 	roomInfo, err := GetRoomInfo(rdb, roomID)

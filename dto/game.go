@@ -38,5 +38,4 @@ type Company struct {
 	StockPrice int    `json:"stockPrice"`
 	StockTotal int    `json:"stockTotal"`
 	Tiles      int    `json:"tiles"`
-	Valuation  int    `json:"valuation"`
 }

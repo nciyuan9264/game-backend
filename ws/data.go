@@ -65,21 +65,30 @@ func GetPlayerInfoField(rdb *redis.Client, ctx context.Context, roomID, playerID
 // 将玩家的牌组批量写入 Redis 列表（尾部追加）
 func SetPlayerTiles(rdb *redis.Client, ctx context.Context, roomID, playerID string, tiles []string) error {
 	tileListKey := fmt.Sprintf("room:%s:player:%s:tiles", roomID, playerID)
-	if len(tiles) == 0 {
-		return nil // 没有牌就直接返回
+
+	// 删除旧的列表
+	if err := rdb.Del(ctx, tileListKey).Err(); err != nil {
+		return fmt.Errorf("删除旧的牌组失败: %w", err)
 	}
 
-	// RPush 支持可变参数，需要转成 interface{} 切片
+	// 没有新的牌就直接返回
+	if len(tiles) == 0 {
+		return nil
+	}
+
+	// RPush 需要 interface{} 类型参数
 	args := make([]interface{}, len(tiles))
 	for i, t := range tiles {
 		args[i] = t
 	}
 
+	// 插入新的列表
 	if err := rdb.RPush(ctx, tileListKey, args...).Err(); err != nil {
-		return fmt.Errorf("添加玩家牌组失败: %w", err)
+		return fmt.Errorf("设置新的牌组失败: %w", err)
 	}
 	return nil
 }
+
 func GetPlayerTiles(rdb *redis.Client, ctx context.Context, roomID, playerID string) ([]string, error) {
 	tileListKey := fmt.Sprintf("room:%s:player:%s:tiles", roomID, playerID)
 	tiles, err := rdb.LRange(ctx, tileListKey, 0, -1).Result()
