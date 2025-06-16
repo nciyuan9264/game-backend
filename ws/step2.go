@@ -97,6 +97,25 @@ func UpdatePlayerStockAndMoney(rdb *redis.Client, ctx context.Context, roomID st
 }
 
 func handleBuyStockMessage(conn *websocket.Conn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
+	currentPlayer, err := GetCurrentPlayer(rdb, repository.Ctx, roomID)
+	if err != nil {
+		log.Println("❌ 获取当前玩家失败:", err)
+		return
+	}
+	if currentPlayer != playerID {
+		log.Println("❌ 不是当前玩家的回合")
+		return
+	}
+
+	roomInfo, err := GetRoomInfo(rdb, roomID)
+	if err != nil {
+		log.Println("❌ 获取房间信息失败:", err)
+		return
+	}
+	if roomInfo.GameStatus != dto.RoomStatusBuyStock {
+		log.Println("❌ 不是buyStock 的状态")
+		return
+	}
 	stocks, ok := msgMap["payload"].(map[string]interface{})
 	if !ok {
 		log.Println("❌ 股票数据格式错误")
@@ -141,7 +160,7 @@ func handleBuyStockMessage(conn *websocket.Conn, rdb *redis.Client, roomID strin
 		}
 	}
 
-	err := GiveRandomTileToPlayer(repository.Rdb, repository.Ctx, roomID, playerID)
+	err = GiveRandomTileToPlayer(repository.Rdb, repository.Ctx, roomID, playerID)
 	if err != nil {
 		log.Println("发牌失败:", err)
 	}

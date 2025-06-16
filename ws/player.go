@@ -8,9 +8,6 @@ import (
 	"go-game/utils"
 	"log"
 	"math/rand/v2"
-
-	"github.com/go-redis/redis/v8"
-	"github.com/gorilla/websocket"
 )
 
 func generateAvailableTiles(roomID string) ([]string, error) {
@@ -103,20 +100,4 @@ func InitPlayerData(roomID string, playerID string) error {
 	}
 
 	return nil
-}
-
-type TriggerRuleParams struct {
-	Conn     *websocket.Conn
-	Rdb      *redis.Client
-	RoomID   string
-	PlayerID string
-	TileKey  string
-}
-
-func getKeysFromSet(set map[string]struct{}) []string {
-	keys := make([]string, 0, len(set))
-	for key := range set {
-		keys = append(keys, key)
-	}
-	return keys
 }

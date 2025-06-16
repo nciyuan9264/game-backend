@@ -364,13 +364,33 @@ func checkTileTriggerRules(rdb *redis.Client, roomID string, playerID string, ti
 
 // 处理玩家放置 tile 消息
 func handlePlaceTileMessage(conn *websocket.Conn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
+	currentPlayer, err := GetCurrentPlayer(rdb, repository.Ctx, roomID)
+	if err != nil {
+		log.Println("❌ 获取当前玩家失败:", err)
+		return
+	}
+	if currentPlayer != playerID {
+		log.Println("❌ 不是当前玩家的回合")
+		return
+	}
+
+	roomInfo, err := GetRoomInfo(rdb, roomID)
+	if err != nil {
+		log.Println("❌ 获取房间信息失败:", err)
+		return
+	}
+	if roomInfo.GameStatus != dto.RoomStatusSetTile {
+		log.Println("❌ 不是放置 tile 的状态")
+		return
+	}
+
 	tileKey, ok := msgMap["payload"].(string)
 	if !ok {
 		log.Println("无效的 payload")
 		return
 	}
 	// Step1: 放置棋子
-	err := placeTile(repository.Rdb, repository.Ctx, roomID, playerID, tileKey)
+	err = placeTile(repository.Rdb, repository.Ctx, roomID, playerID, tileKey)
 	if err != nil {
 		log.Println("放置棋子失败", tileKey)
 		return
@@ -384,6 +404,25 @@ func handlePlaceTileMessage(conn *websocket.Conn, rdb *redis.Client, roomID stri
 }
 
 func handleMergingSelectionMessage(conn *websocket.Conn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
+	currentPlayer, err := GetCurrentPlayer(rdb, repository.Ctx, roomID)
+	if err != nil {
+		log.Println("❌ 获取当前玩家失败:", err)
+		return
+	}
+	if currentPlayer != playerID {
+		log.Println("❌ 不是当前玩家的回合")
+		return
+	}
+
+	roomInfo, err := GetRoomInfo(rdb, roomID)
+	if err != nil {
+		log.Println("❌ 获取房间信息失败:", err)
+		return
+	}
+	if roomInfo.GameStatus != dto.RoomStatusMergingSelection {
+		log.Println("❌ 不是 merging_selection 的状态")
+		return
+	}
 	maincompany, ok := msgMap["payload"].(string)
 	if !ok {
 		log.Println("❌ 留下的公司格式错误")
@@ -433,6 +472,35 @@ func handleMergingSelectionMessage(conn *websocket.Conn, rdb *redis.Client, room
 }
 
 func handleMergingSettleMessage(conn *websocket.Conn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
+	roomInfo, err := GetRoomInfo(rdb, roomID)
+	if err != nil {
+		log.Println("❌ 获取房间信息失败:", err)
+		return
+	}
+	if roomInfo.GameStatus != dto.RoomStatusSetTile {
+		log.Println("❌ 不是放置 tile 的状态")
+		return
+	}
+
+	mergeSettleData, err := GetMergeSettleData(repository.Ctx, rdb, roomID)
+	if err != nil {
+		log.Printf("❌ 获取合并数据失败: %v\n", err)
+		return
+	}
+
+	playerInHoder := false
+	for _, data := range mergeSettleData {
+		oldHoders := data.Hoders
+		for _, h := range oldHoders {
+			if h == playerID {
+				playerInHoder = true
+			}
+		}
+	}
+	if !playerInHoder {
+		log.Println("❌ 玩家不在任何合并中")
+		return
+	}
 	lockKey := fmt.Sprintf("lock:merge_settle:%s", roomID)
 	lockValue := uuid.NewString()
 	locked, err := rdb.SetNX(repository.Ctx, lockKey, lockValue, 5*time.Second).Result()
@@ -522,11 +590,6 @@ func handleMergingSettleMessage(conn *websocket.Conn, rdb *redis.Client, roomID 
 		return
 	}
 
-	mergeSettleData, err := GetMergeSettleData(repository.Ctx, rdb, roomID)
-	if err != nil {
-		log.Printf("❌ 获取合并数据失败: %v\n", err)
-		return
-	}
 	allHodersCleared := true
 	// 移除 Hoders 中的 playerID
 	for key, data := range mergeSettleData {
@@ -625,6 +688,26 @@ func handleMergingSettleMessage(conn *websocket.Conn, rdb *redis.Client, roomID 
 }
 
 func handleCreateCompanyMessage(conn *websocket.Conn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
+	currentPlayer, err := GetCurrentPlayer(rdb, repository.Ctx, roomID)
+	if err != nil {
+		log.Println("❌ 获取当前玩家失败:", err)
+		return
+	}
+	if currentPlayer != playerID {
+		log.Println("❌ 不是当前玩家的回合")
+		return
+	}
+
+	roomInfo, err := GetRoomInfo(rdb, roomID)
+	if err != nil {
+		log.Println("❌ 获取房间信息失败:", err)
+		return
+	}
+	if roomInfo.GameStatus != dto.RoomStatusBuyStock {
+		log.Println("❌ 不是放置 tile 的状态")
+		return
+	}
+
 	company, ok := msgMap["payload"].(string)
 	if !ok {
 		log.Println("❌ 无效的 payload")
