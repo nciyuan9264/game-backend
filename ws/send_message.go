@@ -18,7 +18,6 @@ func SyncRoomMessage(conn *websocket.Conn, roomID string, playerID string, resul
 
 	// ------- 构造 Redis Key -------
 	infoKey := fmt.Sprintf("room:%s:player:%s:info", roomID, playerID)
-	stocksKey := fmt.Sprintf("room:%s:player:%s:stocks", roomID, playerID)
 	tilesKey := fmt.Sprintf("room:%s:player:%s:tiles", roomID, playerID)
 	currentPlayerKey := fmt.Sprintf("room:%s:currentPlayer", roomID)
 	companyIDsKey := fmt.Sprintf("room:%s:company_ids", roomID)
@@ -27,7 +26,6 @@ func SyncRoomMessage(conn *websocket.Conn, roomID string, playerID string, resul
 	// ------- 第一次 pipeline：玩家、房间、tile 基础数据 -------
 	pipe := rdb.Pipeline()
 	infoCmd := pipe.HGetAll(ctx, infoKey)
-	stocksCmd := pipe.HGetAll(ctx, stocksKey)
 	tilesCmd := pipe.LRange(ctx, tilesKey, 0, -1)
 	currentPlayerCmd := pipe.Get(ctx, currentPlayerKey)
 	companyIDsCmd := pipe.SMembers(ctx, companyIDsKey)
@@ -41,7 +39,6 @@ func SyncRoomMessage(conn *websocket.Conn, roomID string, playerID string, resul
 
 	// ------- 提取结果 -------
 	info := infoCmd.Val()
-	stocks := stocksCmd.Val()
 	tiles := tilesCmd.Val()
 	currentPlayer := currentPlayerCmd.Val()
 	companyIDs := companyIDsCmd.Val()
@@ -90,6 +87,11 @@ func SyncRoomMessage(conn *websocket.Conn, roomID string, playerID string, resul
 	mergeSettleData, err := GetMergeSettleData(ctx, rdb, roomID)
 	if err != nil {
 		return fmt.Errorf("❌ 获取合并结算信息失败: %w", err)
+	}
+
+	stocks, err := GetPlayerStocks(rdb, ctx, roomID, playerID)
+	if err != nil {
+		return fmt.Errorf("❌ 获取玩家股票信息失败: %w", err)
 	}
 
 	// ------- 组装消息 -------

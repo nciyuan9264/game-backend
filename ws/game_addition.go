@@ -20,21 +20,21 @@ func handlePlayAudioMessage(conn *websocket.Conn, rdb *redis.Client, roomID stri
 		return
 	}
 
+	msg := map[string]interface{}{
+		"type":    "audio",
+		"message": audioType,
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		log.Println("❌ 编码 JSON 失败:", err)
+		return
+	}
+
 	for _, pc := range Rooms[roomID] {
-		if pc.Online {
-			msg := map[string]interface{}{
-				"type":    "audio",
-				"message": audioType,
-			}
-			data, err := json.Marshal(msg)
+		if pc.Online && pc.Conn != nil {
+			err := pc.Conn.WriteMessage(websocket.TextMessage, data)
 			if err != nil {
-				log.Println("❌ 编码 JSON 失败:", err)
-				continue
-			}
-			err = conn.WriteMessage(websocket.TextMessage, data)
-			if err != nil {
-				log.Println("❌ 发送消息失败:", err)
-				continue
+				log.Printf("❌ 向玩家 %s 发送音频消息失败: %v\n", pc.PlayerID, err)
 			}
 		}
 	}
