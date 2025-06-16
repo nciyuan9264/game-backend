@@ -73,7 +73,7 @@ func InitPlayerData(roomID string, playerID string) error {
 		log.Println("设置玩家信息失败:", err)
 	}
 
-	// 2. 随机抽取起始 Tiles（比如每人 3 个）
+	// 2. 随机抽取起始 Tiles（比如每人 5 个）
 	allTiles, err := generateAvailableTiles(roomID)
 	if err != nil {
 		return err

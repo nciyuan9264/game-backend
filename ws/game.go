@@ -73,20 +73,17 @@ func broadcastToRoomDefault(roomID string, end bool) {
 
 	result := make(map[string]int)
 	for _, pc := range Rooms[roomID] {
-		if pc.Online {
-			playerStocks, err := GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, pc.PlayerID)
-			if err != nil {
-				log.Printf("❌ 获取玩家[%s]股票失败: %v\n", pc.PlayerID, err)
-				continue
-			}
-			playerInfo, err := GetPlayerInfoField(repository.Rdb, repository.Ctx, roomID, pc.PlayerID, "money")
-			if err != nil {
-				log.Printf("❌ 获取玩家[%s]金钱失败: %v\n", pc.PlayerID, err)
-				continue
-			}
-
-			result[pc.PlayerID] = CalculateTotalValue(playerStocks, companyInfoMap) + playerInfo.Money
+		playerStocks, err := GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, pc.PlayerID)
+		if err != nil {
+			log.Printf("❌ 获取玩家[%s]股票失败: %v\n", pc.PlayerID, err)
+			continue
 		}
+		playerInfo, err := GetPlayerInfoField(repository.Rdb, repository.Ctx, roomID, pc.PlayerID, "money")
+		if err != nil {
+			log.Printf("❌ 获取玩家[%s]金钱失败: %v\n", pc.PlayerID, err)
+			continue
+		}
+		result[pc.PlayerID] = CalculateTotalValue(playerStocks, companyInfoMap) + playerInfo.Money
 	}
 
 	for _, pc := range Rooms[roomID] {
@@ -300,6 +297,8 @@ var messageHandlers = map[string]messageHandler{
 	"buy_stock":         handleBuyStockMessage,
 	"merging_selection": handleMergingSelectionMessage,
 	"game_end":          handleGameEndMessage,
+	"play_audio":        handlePlayAudioMessage,
+	"restart_game":      handleRestartGameMessage,
 }
 
 // 持续监听客户端消息，并将其广播给房间内其他玩家
