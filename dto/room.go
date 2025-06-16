@@ -30,7 +30,8 @@ type CreateRoomResponse struct {
 }
 
 type GetRoomList struct {
-	Rooms []RoomInfo `json:"rooms"`
+	Rooms        []RoomInfo `json:"rooms"`
+	OnlinePlayer int        `json:"onlinePlayer"`
 }
 
 type Tile struct {

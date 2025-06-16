@@ -53,12 +53,18 @@ func GetRoomList(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "获取房间列表失败"})
 		return
 	}
+	onlinePlayer, err := service.GetOnlinePlayer()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "获取在线玩家失败"})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "获取成功",
 		"status_code": http.StatusOK,
 		"data": dto.GetRoomList{
-			Rooms: rooms,
+			Rooms:        rooms,
+			OnlinePlayer: onlinePlayer,
 		},
 	})
 }

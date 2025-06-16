@@ -159,6 +159,7 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 
 		roomInfo, err := ws.GetRoomInfo(rdb, roomID)
 		if err != nil {
+			delete(ws.Rooms, roomID)
 			continue
 		}
 		room := dto.RoomInfo{
@@ -172,4 +173,16 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 	}
 
 	return rooms, nil
+}
+
+func GetOnlinePlayer() (int, error) {
+	onlinePlayer := 0
+	for _, room := range ws.Rooms {
+		for _, player := range room {
+			if player.Online {
+				onlinePlayer++
+			}
+		}
+	}
+	return onlinePlayer, nil
 }
