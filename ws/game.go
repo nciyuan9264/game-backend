@@ -6,96 +6,17 @@ import (
 	"fmt"
 	"go-game/dto"
 	"go-game/repository"
-	"go-game/utils"
 	"log"
 	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/websocket"
-	"golang.org/x/exp/rand"
 )
 
 // 房间内的所有连接（简化版）
 var Rooms = make(map[string][]dto.PlayerConn)
 var roomLock sync.Mutex
-
-func broadcastToRoom(roomID string) {
-	broadcastToRoomDefault(roomID, false) // 默认 end 为 false
-}
-
-// 广播消息给房间内所有连接成功的玩家
-func broadcastToRoomDefault(roomID string, end bool) {
-	companyInfoMap, err := GetCompanyInfo(repository.Rdb, roomID)
-	if err != nil {
-		log.Println("获取公司信息失败:", err)
-		return
-	}
-
-	tileMap, err := GetAllRoomTiles(repository.Rdb, roomID)
-	if err != nil {
-		log.Println("获取所有 tile 失败:", err)
-		return
-	}
-	allTileMap := make(map[string]int)
-	for _, tile := range tileMap {
-		if tile.Belong != "" && tile.Belong != "Blank" {
-			allTileMap[tile.Belong] = allTileMap[tile.Belong] + 1
-		}
-	}
-
-	allStockMap := make(map[string]int)
-	for _, pc := range Rooms[roomID] {
-		stockMap, err := GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, pc.PlayerID)
-		if err != nil {
-			log.Printf("❌ 获取玩家[%s]股票失败: %v\n", pc.PlayerID, err)
-			return
-		}
-		for stockID, stockCount := range stockMap {
-			allStockMap[stockID] += stockCount
-		}
-	}
-
-	for companyName, info := range companyInfoMap {
-		stockInfo := utils.GetStockInfo(companyName, allTileMap[companyName])
-		stockLeft := 25 - allStockMap[companyName]
-		info.StockTotal = stockLeft
-		info.Tiles = allTileMap[companyName]
-		info.StockPrice = stockInfo.Price
-		companyInfoMap[companyName] = info
-	}
-
-	err = SetCompanyInfo(repository.Rdb, roomID, companyInfoMap)
-	if err != nil {
-		log.Println("❌ 设置公司信息失败:", err)
-		return
-	}
-
-	result := make(map[string]int)
-	for _, pc := range Rooms[roomID] {
-		playerStocks, err := GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, pc.PlayerID)
-		if err != nil {
-			log.Printf("❌ 获取玩家[%s]股票失败: %v\n", pc.PlayerID, err)
-			continue
-		}
-		playerInfo, err := GetPlayerInfoField(repository.Rdb, repository.Ctx, roomID, pc.PlayerID, "money")
-		if err != nil {
-			log.Printf("❌ 获取玩家[%s]金钱失败: %v\n", pc.PlayerID, err)
-			continue
-		}
-		result[pc.PlayerID] = CalculateTotalValue(playerStocks, companyInfoMap) + playerInfo.Money
-	}
-
-	for _, pc := range Rooms[roomID] {
-		if pc.Online {
-			// 尝试发送消息
-			if err := SyncRoomMessage(pc.Conn, roomID, pc.PlayerID, result); err != nil {
-				log.Println("广播失败，移除连接:", pc.PlayerID)
-				pc.Conn.Close()
-			}
-		}
-	}
-}
 
 func SwitchToNextPlayer(rdb *redis.Client, ctx context.Context, roomID, currentID string) error {
 	roomLock.Lock()
@@ -132,133 +53,6 @@ func SwitchToNextPlayer(rdb *redis.Client, ctx context.Context, roomID, currentI
 	return nil
 }
 
-// 向该客户端发送同步消息
-func SyncRoomMessage(conn *websocket.Conn, roomID string, playerID string, result map[string]int) error {
-	rdb := repository.Rdb
-	ctx := repository.Ctx
-
-	// ------- 构造 Redis Key -------
-	infoKey := fmt.Sprintf("room:%s:player:%s:info", roomID, playerID)
-	stocksKey := fmt.Sprintf("room:%s:player:%s:stocks", roomID, playerID)
-	tilesKey := fmt.Sprintf("room:%s:player:%s:tiles", roomID, playerID)
-	currentPlayerKey := fmt.Sprintf("room:%s:currentPlayer", roomID)
-	companyIDsKey := fmt.Sprintf("room:%s:company_ids", roomID)
-	lastTileKey := fmt.Sprintf("room:%s:last_tile_key_temp", roomID)
-
-	// ------- 第一次 pipeline：玩家、房间、tile 基础数据 -------
-	pipe := rdb.Pipeline()
-	infoCmd := pipe.HGetAll(ctx, infoKey)
-	stocksCmd := pipe.HGetAll(ctx, stocksKey)
-	tilesCmd := pipe.LRange(ctx, tilesKey, 0, -1)
-	currentPlayerCmd := pipe.Get(ctx, currentPlayerKey)
-	companyIDsCmd := pipe.SMembers(ctx, companyIDsKey)
-	lastTileKeyCmd := pipe.Get(ctx, lastTileKey)
-
-	// 执行 pipeline
-	_, err := pipe.Exec(ctx)
-	if err != nil && err != redis.Nil {
-		return fmt.Errorf("❌ Redis pipeline 执行失败: %w", err)
-	}
-
-	// ------- 提取结果 -------
-	info := infoCmd.Val()
-	stocks := stocksCmd.Val()
-	tiles := tilesCmd.Val()
-	currentPlayer := currentPlayerCmd.Val()
-	companyIDs := companyIDsCmd.Val()
-	lastTile := lastTileKeyCmd.Val()
-
-	// ------- 第二次 pipeline：批量获取所有公司信息 -------
-	pipe2 := rdb.Pipeline()
-	companyCmds := make(map[string]*redis.StringStringMapCmd)
-
-	for _, companyID := range companyIDs {
-		companyKey := fmt.Sprintf("room:%s:company:%s", roomID, companyID)
-		companyCmds[companyID] = pipe2.HGetAll(ctx, companyKey)
-	}
-
-	_, err = pipe2.Exec(ctx)
-	if err != nil && err != redis.Nil {
-		return fmt.Errorf("❌ 获取公司信息 pipeline 执行失败: %w", err)
-	}
-
-	companyInfo, err := GetCompanyInfo(rdb, roomID)
-	if err != nil {
-		return fmt.Errorf("❌ 获取公司信息失败: %w", err)
-	}
-
-	roomInfo, err := GetRoomInfo(rdb, roomID)
-	if err != nil {
-		return fmt.Errorf("❌ 获取房间信息失败: %w", err)
-	}
-
-	// ------- 其他 Redis 相关调用 -------
-	tileMap, err := GetAllRoomTiles(rdb, roomID)
-	if err != nil {
-		return fmt.Errorf("❌ 获取房间 tile 信息失败: %w", err)
-	}
-
-	merge_main_company_temp, err := GetMergeMainCompany(rdb, ctx, roomID)
-	if err != nil {
-		return fmt.Errorf("❌ 获取合并主公司信息失败: %w", err)
-	}
-
-	merge_selection_temp, err := GetMergingSelection(rdb, ctx, roomID)
-	if err != nil {
-		return fmt.Errorf("❌ 获取合并选择信息失败: %w", err)
-	}
-
-	mergeSettleData, err := GetMergeSettleData(ctx, rdb, roomID)
-	if err != nil {
-		return fmt.Errorf("❌ 获取合并结算信息失败: %w", err)
-	}
-
-	// ------- 组装消息 -------
-	msg := map[string]interface{}{
-		"type":     "sync",
-		"result":   result,
-		"playerId": playerID,
-		"playerData": map[string]interface{}{
-			"info":   info,
-			"stocks": stocks,
-			"tiles":  tiles,
-		},
-		"roomData": map[string]interface{}{
-			"companyInfo":   companyInfo,
-			"currentPlayer": currentPlayer,
-			"roomInfo":      roomInfo,
-			"tiles":         tileMap,
-		},
-		"tempData": map[string]interface{}{
-			"last_tile_key":           lastTile,
-			"merge_main_company_temp": merge_main_company_temp,
-			"merge_selection_temp":    merge_selection_temp,
-			"mergeSettleData":         mergeSettleData,
-		},
-	}
-
-	// ------- 发送 WebSocket 消息 -------
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("❌ 编码 JSON 失败: %w", err)
-	}
-
-	return conn.WriteMessage(websocket.TextMessage, data)
-}
-
-// 获取房间中玩家数量
-func getRoomPlayerCount(roomID string) int {
-	roomLock.Lock()
-	defer roomLock.Unlock()
-	onLineCount := 0
-	for _, pc := range Rooms[roomID] {
-		if pc.Online {
-			onLineCount++
-		}
-	}
-	return onLineCount
-}
-
 // 玩家断开连接后，从房间中移除该连接
 func cleanupOnDisconnect(roomID, playerID string, conn *websocket.Conn) {
 	roomLock.Lock()
@@ -287,8 +81,10 @@ func cleanupOnDisconnect(roomID, playerID string, conn *websocket.Conn) {
 	broadcastToRoom(roomID)
 }
 
+// 消息处理函数类型
 type messageHandler func(conn *websocket.Conn, rdb *redis.Client, roomID, playerID string, msgMap map[string]interface{})
 
+// 消息处理函数映射
 var messageHandlers = map[string]messageHandler{
 	"ready":             handleReadyMessage,
 	"place_tile":        handlePlaceTileMessage,
@@ -357,39 +153,4 @@ func HandleWebSocket(c *gin.Context) {
 	// 离开时清理资源
 	defer cleanupOnDisconnect(roomID, playerID, conn)
 	listenAndBroadcastMessages(conn, roomID, playerID)
-}
-
-func handleReadyMessage(conn *websocket.Conn, rdb *redis.Client, roomID, playerID string, msgMap map[string]interface{}) {
-	roomInfo, err := GetRoomInfo(repository.Rdb, roomID)
-	if err != nil {
-		log.Println("❌ 无法获取房间信息:", err)
-		return
-	}
-	maxPlayers := roomInfo.MaxPlayers
-	InitPlayerData(roomID, playerID)
-	// 获取房间当前人数
-	playerCount := getRoomPlayerCount(roomID)
-	log.Printf("玩家加入 room=%s，ID=%s，当前人数=%d/%d", roomID, playerID, playerCount, maxPlayers)
-
-	if playerCount == maxPlayers {
-		err := SetRoomStatus(repository.Rdb, roomID, true)
-		if err != nil {
-			log.Println("❌ 设置房间状态失败:", err)
-			return
-		}
-
-		playerID, err := GetCurrentPlayer(repository.Rdb, repository.Ctx, roomID)
-		if err != nil {
-			log.Println("❌ 获取当前玩家失败:", err)
-			return
-		}
-		if playerID == "" {
-			randomPlayerID := Rooms[roomID][rand.Intn(maxPlayers)]
-			err := SetCurrentPlayer(repository.Rdb, repository.Ctx, roomID, randomPlayerID.PlayerID)
-			if err != nil {
-				log.Println("❌ 设置当前玩家失败:", err)
-				return
-			}
-		}
-	}
 }

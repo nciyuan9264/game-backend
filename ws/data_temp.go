@@ -81,3 +81,48 @@ func GetMergingSelection(rdb *redis.Client, ctx context.Context, roomID string) 
 
 	return selection, nil
 }
+
+// SetLastTileKey 保存刚才放置的tile
+func SetLastTileKey(rdb *redis.Client, ctx context.Context, roomID, playerID, tileKey string) error {
+	createTileKey := fmt.Sprintf("room:%s:last_tile_key_temp", roomID)
+	if err := rdb.Set(ctx, createTileKey, tileKey, 0).Err(); err != nil {
+		return fmt.Errorf("保存触发创建公司tile编号失败: %w", err)
+	}
+	return nil
+}
+
+// GetLastTileKey 获取刚才放置的tile
+func GetLastTileKey(rdb *redis.Client, ctx context.Context, roomID string) (string, error) {
+	createTileKey := fmt.Sprintf("room:%s:last_tile_key_temp", roomID)
+	tileKey, err := rdb.Get(ctx, createTileKey).Result()
+	if err != nil {
+		return "", fmt.Errorf("获取触发创建公司tile编号失败: %w", err)
+	}
+	return tileKey, nil
+}
+
+// SetMergeMainCompany 设置合并的主公司名称
+func SetMergeMainCompany(rdb *redis.Client, ctx context.Context, roomID string, company string) error {
+	mainCompanyNameKey := fmt.Sprintf("room:%s:merge_main_company_temp", roomID)
+	if err := rdb.Set(ctx, mainCompanyNameKey, company, 0).Err(); err != nil {
+		return fmt.Errorf("设置合并主公司失败: %w", err)
+	}
+	return nil
+}
+
+// GetMergeMainCompany 从Redis获取合并的主公司名称
+func GetMergeMainCompany(rdb *redis.Client, ctx context.Context, roomID string) (string, error) {
+	mainCompanyKey := fmt.Sprintf("room:%s:merge_main_company_temp", roomID)
+
+	// 从Redis获取主公司名称
+	company, err := rdb.Get(ctx, mainCompanyKey).Result()
+	if err != nil {
+		if err == redis.Nil {
+			// 键不存在时返回空字符串
+			return "", nil
+		}
+		return "", fmt.Errorf("获取主公司名称失败: %w", err)
+	}
+
+	return company, nil
+}

@@ -5,7 +5,9 @@ import (
 	"go-game/repository"
 	"log"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/websocket"
+	"golang.org/x/exp/rand"
 )
 
 // 校验房间是否有空位，并将玩家加入房间
@@ -39,4 +41,50 @@ func validateAndJoinRoom(roomID, playerID string, conn *websocket.Conn) bool {
 	})
 	log.Printf("玩家 %s 加入房间 %s\n", playerID, roomID)
 	return true
+}
+
+// 获取房间中玩家数量
+func getRoomPlayerCount(roomID string) int {
+	onLineCount := 0
+	for _, pc := range Rooms[roomID] {
+		if pc.Online {
+			onLineCount++
+		}
+	}
+	return onLineCount
+}
+
+func handleReadyMessage(conn *websocket.Conn, rdb *redis.Client, roomID, playerID string, msgMap map[string]interface{}) {
+	roomInfo, err := GetRoomInfo(repository.Rdb, roomID)
+	if err != nil {
+		log.Println("❌ 无法获取房间信息:", err)
+		return
+	}
+	maxPlayers := roomInfo.MaxPlayers
+	InitPlayerData(roomID, playerID)
+	// 获取房间当前人数
+	playerCount := getRoomPlayerCount(roomID)
+	log.Printf("玩家加入 room=%s，ID=%s，当前人数=%d/%d", roomID, playerID, playerCount, maxPlayers)
+
+	if playerCount == maxPlayers {
+		err := SetRoomStatus(repository.Rdb, roomID, true)
+		if err != nil {
+			log.Println("❌ 设置房间状态失败:", err)
+			return
+		}
+
+		playerID, err := GetCurrentPlayer(repository.Rdb, repository.Ctx, roomID)
+		if err != nil {
+			log.Println("❌ 获取当前玩家失败:", err)
+			return
+		}
+		if playerID == "" {
+			randomPlayerID := Rooms[roomID][rand.Intn(maxPlayers)]
+			err := SetCurrentPlayer(repository.Rdb, repository.Ctx, roomID, randomPlayerID.PlayerID)
+			if err != nil {
+				log.Println("❌ 设置当前玩家失败:", err)
+				return
+			}
+		}
+	}
 }

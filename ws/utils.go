@@ -2,7 +2,6 @@ package ws
 
 import (
 	"fmt"
-	"go-game/dto"
 	"go-game/entities"
 	"go-game/repository"
 	"log"
@@ -38,29 +37,18 @@ func upgradeConnection(c *gin.Context) (*websocket.Conn, error) {
 	return conn, err
 }
 
-func getTileBelong(rdb *redis.Client, roomID, tileKey string) (string, error) {
-	tileMap, err := GetAllRoomTiles(repository.Rdb, roomID)
-	if err != nil {
-		return "", err
-	}
-
-	if err != nil {
-		return "", err
-	}
-	return tileMap[tileKey].Belong, nil
-}
-
 // getConnectedTiles 用于从 tileKey 开始，递归查找相邻、归属一致的 tile
 func getConnectedTiles(rdb *redis.Client, roomID, startTileKey string) []string {
 	visited := make(map[string]bool)
 	queue := []string{startTileKey}
 	var connected []string
 
-	startTileOwner, err := getTileBelong(rdb, roomID, startTileKey)
+	startTile, err := GetTileFromRedis(rdb, repository.Ctx, roomID, startTileKey)
 	if err != nil {
-		log.Println("无法获取起始 tile 所属公司:", err)
+		log.Println("无法获取起始 tile :", err)
 		return connected
 	}
+	startTileOwner := startTile.Belong
 
 	for len(queue) > 0 {
 		tile := queue[0]
@@ -77,7 +65,8 @@ func getConnectedTiles(rdb *redis.Client, roomID, startTileKey string) []string 
 			if visited[neighbor] {
 				continue
 			}
-			belong, err := getTileBelong(rdb, roomID, neighbor)
+			tile, err := GetTileFromRedis(rdb, repository.Ctx, roomID, neighbor)
+			belong := tile.Belong
 			if err == nil && belong == startTileOwner {
 				queue = append(queue, neighbor)
 			}
@@ -85,28 +74,6 @@ func getConnectedTiles(rdb *redis.Client, roomID, startTileKey string) []string 
 	}
 
 	return connected
-}
-
-func SetGameStatus(rdb *redis.Client, roomID string, status dto.RoomStatus) error {
-	roomInfoKey := fmt.Sprintf("room:%s:roomInfo", roomID)
-	err := rdb.HSet(repository.Ctx, roomInfoKey, "gameStatus", string(status)).Err()
-	if err != nil {
-		log.Printf("更新房间状态失败（roomID: %s，gameStatus: %s）: %v\n", roomID, status, err)
-		return err
-	}
-	log.Printf("房间（roomID: %s）状态已更新为：%s\n", roomID, status)
-	return nil
-}
-
-func SetRoomStatus(rdb *redis.Client, roomID string, status bool) error {
-	roomInfoKey := fmt.Sprintf("room:%s:roomInfo", roomID)
-	statusStr := strconv.FormatBool(status) // 将 bool 转为字符串 "true"/"false"
-
-	err := rdb.HSet(repository.Ctx, roomInfoKey, "roomStatus", statusStr).Err()
-	if err != nil {
-		return fmt.Errorf("更新房间状态失败: %w", err)
-	}
-	return nil
 }
 
 // 自定义 HookFunc，把字符串转换成 int

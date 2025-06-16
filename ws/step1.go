@@ -20,7 +20,7 @@ import (
 // PlaceTile 用于处理将棋子放置到棋盘上：修改 tile 的 belong 字段并更新 Redis，同时从玩家手牌中移除该 tile。
 func placeTile(rdb *redis.Client, ctx context.Context, roomID, playerID, tileKey string) error {
 	// Step 1：下棋
-	if err := SetTileToRedis(rdb, ctx, roomID, tileKey, dto.Tile{ID: tileKey, Belong: "Blank"}); err != nil {
+	if err := UpdateTileValue(rdb, roomID, tileKey, dto.Tile{ID: tileKey, Belong: "Blank"}); err != nil {
 		return fmt.Errorf("❌ 写入 tile 出错: %w", err)
 	}
 

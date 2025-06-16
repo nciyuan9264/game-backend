@@ -6,5 +6,5 @@ import (
 )
 
 func handleGameEndMessage(conn *websocket.Conn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
-	broadcastToRoomDefault(roomID, true)
+	broadcastToRoom(roomID)
 }
