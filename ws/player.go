@@ -80,7 +80,7 @@ func InitPlayerData(roomID string, playerID string) error {
 	}
 	rand.Shuffle(len(allTiles), func(i, j int) { allTiles[i], allTiles[j] = allTiles[j], allTiles[i] })
 
-	playerTiles := utils.SafeSlice(allTiles, 45)
+	playerTiles := utils.SafeSlice(allTiles, 5)
 	err = SetPlayerTiles(repository.Rdb, repository.Ctx, roomID, playerID, playerTiles)
 	if err != nil {
 		log.Println(err)
