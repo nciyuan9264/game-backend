@@ -113,7 +113,7 @@ func handleBuyStockMessage(conn *websocket.Conn, rdb *redis.Client, roomID strin
 		return
 	}
 	if roomInfo.GameStatus != dto.RoomStatusBuyStock {
-		log.Println("❌ 不是buyStock 的状态")
+		log.Println("❌ 不是 buyStock 的状态")
 		return
 	}
 	stocks, ok := msgMap["payload"].(map[string]interface{})

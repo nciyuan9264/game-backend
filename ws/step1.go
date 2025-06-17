@@ -477,8 +477,8 @@ func handleMergingSettleMessage(conn *websocket.Conn, rdb *redis.Client, roomID 
 		log.Println("❌ 获取房间信息失败:", err)
 		return
 	}
-	if roomInfo.GameStatus != dto.RoomStatusSetTile {
-		log.Println("❌ 不是放置 tile 的状态")
+	if roomInfo.GameStatus != dto.RoomStatusMergingSettle {
+		log.Println("❌ 不是合并 的状态")
 		return
 	}
 
@@ -703,8 +703,8 @@ func handleCreateCompanyMessage(conn *websocket.Conn, rdb *redis.Client, roomID 
 		log.Println("❌ 获取房间信息失败:", err)
 		return
 	}
-	if roomInfo.GameStatus != dto.RoomStatusBuyStock {
-		log.Println("❌ 不是放置 tile 的状态")
+	if roomInfo.GameStatus != dto.RoomStatusCreateCompany {
+		log.Println("❌ 不是创建公司的状态")
 		return
 	}
 
