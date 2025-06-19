@@ -168,7 +168,7 @@ func handleBuyStockMessage(conn *websocket.Conn, rdb *redis.Client, roomID strin
 	if err := SwitchToNextPlayer(rdb, repository.Ctx, roomID, playerID); err != nil {
 		log.Println("切换玩家失败:", err)
 	}
-	// 最后设置房间状态为结算
+	// 最后设置房间状态为 setTile
 	err = SetGameStatus(rdb, roomID, dto.RoomStatusSetTile)
 	if err != nil {
 		log.Println("❌ 设置房间状态失败:", err)
