@@ -1,9 +1,11 @@
 package ws
 
 import (
+	"fmt"
 	"go-game/dto"
 	"go-game/repository"
 	"log"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/websocket"
@@ -72,6 +74,9 @@ func handleReadyMessage(conn *websocket.Conn, rdb *redis.Client, roomID, playerI
 			log.Println("❌ 设置房间状态失败:", err)
 			return
 		}
+
+		startKey := fmt.Sprintf("room:%s:game_start_time", roomID)
+		repository.Rdb.Set(repository.Ctx, startKey, time.Now().Format("20060102_150405"), 0)
 
 		playerID, err := GetCurrentPlayer(repository.Rdb, repository.Ctx, roomID)
 		if err != nil {

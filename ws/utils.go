@@ -6,8 +6,10 @@ import (
 	"go-game/repository"
 	"log"
 	"net/http"
+	"path"
 	"reflect"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
@@ -153,4 +155,16 @@ func CalculateTotalValue(playerStocks map[string]int, companyInfoMap map[string]
 		totalValue += count * companyInfo.StockPrice
 	}
 	return totalValue
+}
+
+func getGameLogFilePath(roomID string) string {
+	// 建议你在房间初始化时设置一个 startTime 或 gameID
+	// 这里假设你用启动时间生成文件名
+	startKey := fmt.Sprintf("room:%s:game_start_time", roomID)
+	startTimeStr, err := repository.Rdb.Get(repository.Ctx, startKey).Result()
+	if err != nil {
+		startTimeStr = time.Now().Format("20060102_150405") // fallback
+	}
+	fileName := fmt.Sprintf("%s_%s.json", roomID, startTimeStr)
+	return path.Join("./game_logs", fileName)
 }

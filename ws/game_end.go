@@ -15,5 +15,8 @@ func handleGameEndMessage(conn *websocket.Conn, rdb *redis.Client, roomID string
 		return
 	}
 
+	logPath := getGameLogFilePath(roomID)
+	log.Println("✅ 游戏日志保存于:", logPath)
+
 	broadcastToRoom(roomID)
 }

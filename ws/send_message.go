@@ -3,13 +3,59 @@ package ws
 import (
 	"encoding/json"
 	"fmt"
+	"go-game/entities"
 	"go-game/repository"
 	"go-game/utils"
 	"log"
+	"os"
+	"path"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/websocket"
 )
+
+func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[string]interface{}) {
+	go func() {
+		logPath := getGameLogFilePath(roomID)
+
+		// 确保目录存在
+		if err := os.MkdirAll(path.Dir(logPath), 0755); err != nil {
+			log.Println("❌ 创建日志目录失败:", err)
+			return
+		}
+
+		entry := map[string]interface{}{
+			"timestamp":  time.Now().Format("2006-01-02 15:04:05"),
+			"result":     msg["result"],
+			"roomInfo":   roomInfo,
+			"playerID":   playerID,
+			"playerData": msg["playerData"],
+			"roomData":   msg["roomData"],
+		}
+
+		jsonEntry, err := json.Marshal(entry)
+		if err != nil {
+			log.Println("❌ 序列化日志 entry 失败:", err)
+			return
+		}
+
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			log.Println("❌ 打开游戏日志文件失败:", err)
+			return
+		}
+		defer f.Close()
+
+		if _, err := f.Write(jsonEntry); err != nil {
+			log.Println("❌ 写入日志失败:", err)
+			return
+		}
+		if _, err := f.Write([]byte("\n")); err != nil {
+			log.Println("❌ 写入换行失败:", err)
+		}
+	}()
+}
 
 // 向该客户端发送同步消息
 func SyncRoomMessage(conn *websocket.Conn, roomID string, playerID string, result map[string]int) error {
@@ -123,7 +169,9 @@ func SyncRoomMessage(conn *websocket.Conn, roomID string, playerID string, resul
 	if err != nil {
 		return fmt.Errorf("❌ 编码 JSON 失败: %w", err)
 	}
-
+	if playerID == currentPlayer {
+		WriteGameLog(roomID, playerID, roomInfo, msg)
+	}
 	return conn.WriteMessage(websocket.TextMessage, data)
 }
 
