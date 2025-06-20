@@ -8,6 +8,7 @@ import (
 	"go-game/utils"
 	"log"
 	"math/rand/v2"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/websocket"
@@ -150,6 +151,10 @@ func handleRestartGameMessage(conn ReadWriteConn, rdb *redis.Client, roomID stri
 		}
 		rdb.SAdd(repository.Ctx, fmt.Sprintf("room:%s:company_ids", roomID), id)
 	}
+	startKey := fmt.Sprintf("room:%s:game_start_time", roomID)
+	repository.Rdb.Set(repository.Ctx, startKey, time.Now().Format("20060102_150405"), 0)
 
-	broadcastToRoom(roomID)
+	time.Sleep(2 * time.Second)
+
+	BroadcastToRoom(roomID)
 }

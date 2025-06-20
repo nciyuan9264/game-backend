@@ -33,6 +33,7 @@ func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[
 			"playerID":   playerID,
 			"playerData": msg["playerData"],
 			"roomData":   msg["roomData"],
+			"tempData":   msg["tempData"],
 		}
 
 		jsonEntry, err := json.Marshal(entry)
@@ -47,6 +48,8 @@ func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[
 			return
 		}
 		defer f.Close()
+
+		jsonEntry = append(jsonEntry, ',')
 
 		if _, err := f.Write(jsonEntry); err != nil {
 			log.Println("❌ 写入日志失败:", err)
@@ -177,7 +180,7 @@ func SyncRoomMessage(conn dto.ConnInterface, roomID string, playerID string, res
 }
 
 // 广播消息给房间内所有连接成功的玩家
-func broadcastToRoom(roomID string) {
+func BroadcastToRoom(roomID string) {
 	companyInfoMap, err := GetCompanyInfo(repository.Rdb, roomID)
 	if err != nil {
 		log.Println("获取公司信息失败:", err)

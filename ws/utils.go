@@ -165,6 +165,7 @@ func getGameLogFilePath(roomID string) string {
 	startTimeStr, err := repository.Rdb.Get(repository.Ctx, startKey).Result()
 	if err != nil {
 		startTimeStr = time.Now().Format("20060102_150405") // fallback
+		repository.Rdb.Set(repository.Ctx, startKey, time.Now().Format("20060102_150405"), 0)
 	}
 	fileName := fmt.Sprintf("%s_%s.json", roomID, startTimeStr)
 	return path.Join("./game_logs", fileName)

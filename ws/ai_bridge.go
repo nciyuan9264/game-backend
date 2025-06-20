@@ -16,7 +16,7 @@ func CallPythonAI(actionType, roomID, playerID string, gameState map[string]inte
 		"action":    actionType, // 动作类型，比如 setTile、buyStock 等
 		"roomID":    roomID,
 		"playerID":  playerID,
-		"gameState": gameState, // 传当前房间的游戏状态（你从 broadcastToRoom 或 Redis 拼出来的）
+		"gameState": gameState, // 传当前房间的游戏状态（你从 BroadcastToRoom 或 Redis 拼出来的）
 	}
 
 	jsonData, _ := json.Marshal(payload)

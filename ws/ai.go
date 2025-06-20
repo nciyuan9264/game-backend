@@ -158,11 +158,17 @@ func min(a, b, c int) int {
 	return c
 }
 
+func min2(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func IsAIPlayer(playerID string) bool {
 	return strings.HasPrefix(playerID, "ai_") // 简单策略，也可以是数据库字段
 }
-
-func chooseMergingSettleForAI(roomID, playerID string) []map[string]interface{} {
+func chooseMergingSettleForAI(roomID, playerID string) []dto.MergingSettleItem {
 	playerData, err := GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, playerID)
 	if err != nil {
 		log.Println("❌ 获取玩家股票信息失败:", err)
@@ -187,28 +193,38 @@ func chooseMergingSettleForAI(roomID, playerID string) []map[string]interface{} 
 		return nil
 	}
 
-	result := []map[string]interface{}{}
+	result := []dto.MergingSettleItem{}
+
 	for companyKey := range mergeSettleData {
 		count := playerData[companyKey]
 		if count == 0 {
 			continue
 		}
 		mainCompanyInfo := companyInfo[mainCompany]
-		companyInfo := companyInfo[companyKey]
+		company := companyInfo[companyKey]
+
 		exchangeAmount := 0
-		if companyInfo.StockPrice > mainCompanyInfo.StockPrice/2 {
-			if count%2 == 0 {
-				exchangeAmount = count
-				count = 0
-			} else {
-				exchangeAmount = (count - 1)
-				count = 1
+		sellAmount := count
+
+		if company.StockPrice/2 >= mainCompanyInfo.StockPrice {
+			// 可交换的最大偶数股数（不超过 count 且为偶数）
+			maxEven := count
+			if maxEven%2 != 0 {
+				maxEven -= 1
 			}
+
+			// 主公司最多能接受的交换数（以 2 股换 1 股）
+			maxCanExchange := mainCompanyInfo.StockTotal * 2
+
+			// 取两者中较小的
+			exchangeAmount = min2(maxEven, maxCanExchange)
+			sellAmount = count - exchangeAmount
 		}
-		result = append(result, map[string]interface{}{
-			"company":        companyKey,
-			"sellAmount":     count,
-			"exchangeAmount": exchangeAmount,
+
+		result = append(result, dto.MergingSettleItem{
+			Company:        companyKey,
+			SellAmount:     sellAmount,
+			ExchangeAmount: exchangeAmount,
 		})
 	}
 
@@ -228,9 +244,12 @@ func chooseMergingSelectionForAI(roomID, playerID string, mainCompany []string) 
 		return ""
 	}
 	res := ""
-	max := 0
+	max := -1
 	for _, companyKey := range mainCompany {
 		stockInUse := 25 - companyInfo[companyKey].StockTotal
+		if stockInUse == 0 {
+			continue // 避免除以 0
+		}
 		num := playerStocks[companyKey] / stockInUse
 		if num > max {
 			max = num
@@ -263,11 +282,17 @@ func MaybeRunAIIfNeeded(roomID string, data []byte) bool {
 	if !ok {
 		return false
 	}
+
 	gameStatusStr, ok := roomInfo["gameStatus"].(string)
 	if !ok || gameStatusStr == "" {
 		return false
 	}
 	gameStatus := dto.RoomStatus(gameStatusStr)
+
+	playerId, ok := msg["playerId"].(string)
+	if !ok || playerId == "" || (playerId != currentPlayerID && gameStatus != dto.RoomStatusMergingSettle) {
+		return false
+	}
 
 	// 判断是否是 AI 玩家
 	if !IsAIPlayer(currentPlayerID) && gameStatus != dto.RoomStatusMergingSettle {
@@ -306,19 +331,38 @@ func MaybeRunAIIfNeeded(roomID string, data []byte) bool {
 		// 仅当玩家在合并对象中时才进行 AI 操作
 		playerInHoder := false
 		for _, data := range mergeSettleData {
-			for _, h := range data.Hoders {
-				if h == currentPlayerID {
-					playerInHoder = true
-				}
+			if (len(data.Hoders)) == 0 {
+				continue
+			}
+			if data.Hoders[0] == playerId {
+				playerInHoder = true
+				break
 			}
 		}
 		if !playerInHoder {
-			log.Println("❌ 玩家不在任何合并中")
+			log.Println("❌ 外层校验玩家不在任何合并中")
 			return false
 		}
 	}
 
-	log.Printf("🤖 当前是 AI 玩家 %s 的回合，状态为 %s，准备延迟执行 AI 行动...", currentPlayerID, gameStatus)
+	allTile, err := GetAllRoomTiles(repository.Rdb, roomID)
+	if err != nil {
+		log.Println("❌ 获取所有 tile 失败:", err)
+		return false
+	}
+	isAllTileUsed := true
+	for _, tile := range allTile {
+		if tile.Belong == "" {
+			isAllTileUsed = false
+		}
+	}
+	if isAllTileUsed {
+		log.Println("❌ 所有 tile 已被使用")
+		time.Sleep(3 * time.Second)
+		SetGameStatus(repository.Rdb, roomID, dto.RoomStatusEnd)
+	}
+
+	log.Printf("🤖 当前是 AI 玩家 %s 的回合，状态为 %s，准备延迟执行 AI 行动...", playerId, gameStatus)
 
 	// ---------- 在协程中延迟执行 ----------
 	go func() {
@@ -363,10 +407,14 @@ func MaybeRunAIIfNeeded(roomID string, data []byte) bool {
 				"payload": selection,
 			}
 		case "mergingSettle":
-			settle := chooseMergingSettleForAI(roomID, currentPlayerID)
+			settle := chooseMergingSettleForAI(roomID, playerId)
 			aiMsg = map[string]interface{}{
 				"type":    "merging_settle",
 				"payload": settle,
+			}
+		case "end":
+			aiMsg = map[string]interface{}{
+				"type": "restart_game",
 			}
 		default:
 			log.Printf("⚠️ 当前状态 %s 未定义 AI 行为", gameStatus)
@@ -374,11 +422,11 @@ func MaybeRunAIIfNeeded(roomID string, data []byte) bool {
 		}
 
 		// 加入 playerID 然后交给 handler 执行
-		aiMsg["playerID"] = currentPlayerID
+		aiMsg["playerID"] = playerId
 		if handler, found := messageHandlers[aiMsg["type"].(string)]; found {
-			log.Printf("🤖 AI [%s] 执行操作: %s", currentPlayerID, aiMsg["type"])
-			handler(conn, rdb, roomID, currentPlayerID, aiMsg)
-			broadcastToRoom(roomID)
+			log.Printf("🤖 AI [%s] 执行操作: %s", playerId, aiMsg["type"])
+			handler(conn, rdb, roomID, playerId, aiMsg)
+			BroadcastToRoom(roomID)
 		} else {
 			log.Printf("❌ AI 未找到 handler 类型: %s", aiMsg["type"])
 		}

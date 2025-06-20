@@ -111,6 +111,16 @@ func CreateRoom(params dto.CreateRoomRequest) (string, error) {
 
 	if params.GameType == "ai" {
 		ws.JoinRoomAsAI(roomID, "ai_001")
+		// ws.JoinRoomAsAI(roomID, "ai_002")
+		// err := ws.SetCurrentPlayer(repository.Rdb, repository.Ctx, roomID, "ai_001")
+		// if err != nil {
+		// 	log.Println("❌ 设置当前玩家失败:", err)
+		// }
+		// err = ws.SetRoomStatus(repository.Rdb, roomID, true)
+		// if err != nil {
+		// 	log.Println("❌ 设置房间状态失败:", err)
+		// }
+		// ws.BroadcastToRoom(roomID)
 	}
 	return roomID, nil
 }

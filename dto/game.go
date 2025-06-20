@@ -44,9 +44,9 @@ type SettleData struct {
 }
 
 type MergingSettleItem struct {
-	Company        string  `json:"company"`
-	SellAmount     float64 `json:"sellAmount"`
-	ExchangeAmount float64 `json:"exchangeAmount"`
+	Company        string `json:"company"`
+	SellAmount     int    `json:"sellAmount"`
+	ExchangeAmount int    `json:"exchangeAmount"`
 }
 
 type Company struct {

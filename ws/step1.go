@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"go-game/dto"
 	"go-game/entities"
@@ -513,29 +514,20 @@ func handleMergingSettleMessage(conn ReadWriteConn, rdb *redis.Client, roomID st
 		}
 	}()
 
-	payload, ok := msgMap["payload"].([]interface{})
-	if !ok {
-		log.Println("❌ 无效的 payload")
+	payloadRaw := msgMap["payload"]
+
+	// 将 interface{} 编码成 JSON
+	payloadBytes, err := json.Marshal(payloadRaw)
+	if err != nil {
+		log.Println("❌ payload 编码失败:", err)
 		return
 	}
 
-	var result []dto.MergingSettleItem
-	for _, item := range payload {
-		itemMap, ok := item.(map[string]interface{})
-		if !ok {
-			log.Println("❌ payload 子项不是 map")
-			return
-		}
-
-		company, _ := itemMap["company"].(string)
-		sellAmount, _ := itemMap["sellAmount"].(float64)
-		exchangeAmount, _ := itemMap["exchangeAmount"].(float64)
-
-		result = append(result, dto.MergingSettleItem{
-			Company:        company,
-			SellAmount:     sellAmount,
-			ExchangeAmount: exchangeAmount,
-		})
+	// 反序列化为结构体切片
+	var settleActions []dto.MergingSettleItem
+	if err := json.Unmarshal(payloadBytes, &settleActions); err != nil {
+		log.Println("❌ payload 反序列化失败:", err)
+		return
 	}
 
 	companyInfo, err := GetCompanyInfo(rdb, roomID)
@@ -556,7 +548,7 @@ func handleMergingSettleMessage(conn ReadWriteConn, rdb *redis.Client, roomID st
 		return
 	}
 
-	for _, item := range result {
+	for _, item := range settleActions {
 		companyData, ok := companyInfo[item.Company]
 		if !ok {
 			log.Printf("❌ 找不到公司[%s]的信息\n", item.Company)

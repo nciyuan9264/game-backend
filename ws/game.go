@@ -78,7 +78,7 @@ func cleanupOnDisconnect(roomID, playerID string, conn *websocket.Conn) {
 	if roomInfo.RoomStatus {
 		SetRoomStatus(repository.Rdb, roomID, false)
 	}
-	broadcastToRoom(roomID)
+	BroadcastToRoom(roomID)
 }
 
 // 消息处理函数类型
@@ -126,7 +126,7 @@ func listenAndBroadcastMessages(conn ReadWriteConn, roomID, playerID string) {
 		if msgType, ok := msgMap["type"].(string); ok {
 			if handler, found := messageHandlers[msgType]; found {
 				handler(conn, repository.Rdb, roomID, playerID, msgMap)
-				broadcastToRoom(roomID)
+				BroadcastToRoom(roomID)
 			} else {
 				log.Printf("⚠️ 未知的消息类型: %s", msgType)
 			}
@@ -161,7 +161,7 @@ func HandleWebSocket(c *gin.Context) {
 		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"房间已满"}`))
 		return
 	}
-	broadcastToRoom(roomID)
+	BroadcastToRoom(roomID)
 	// 离开时清理资源
 	defer cleanupOnDisconnect(roomID, playerID, conn)
 	listenAndBroadcastMessages(conn, roomID, playerID)
