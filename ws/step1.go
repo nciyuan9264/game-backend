@@ -13,7 +13,6 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
 	"github.com/mitchellh/mapstructure"
 )
 
@@ -363,7 +362,7 @@ func checkTileTriggerRules(rdb *redis.Client, roomID string, playerID string, ti
 }
 
 // 处理玩家放置 tile 消息
-func handlePlaceTileMessage(conn *websocket.Conn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
+func handlePlaceTileMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
 	currentPlayer, err := GetCurrentPlayer(rdb, repository.Ctx, roomID)
 	if err != nil {
 		log.Println("❌ 获取当前玩家失败:", err)
@@ -403,7 +402,7 @@ func handlePlaceTileMessage(conn *websocket.Conn, rdb *redis.Client, roomID stri
 	}
 }
 
-func handleMergingSelectionMessage(conn *websocket.Conn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
+func handleMergingSelectionMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
 	currentPlayer, err := GetCurrentPlayer(rdb, repository.Ctx, roomID)
 	if err != nil {
 		log.Println("❌ 获取当前玩家失败:", err)
@@ -468,10 +467,9 @@ func handleMergingSelectionMessage(conn *websocket.Conn, rdb *redis.Client, room
 		log.Println("❌ 处理合并过程失败:", err)
 		return
 	}
-	broadcastToRoom(roomID)
 }
 
-func handleMergingSettleMessage(conn *websocket.Conn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
+func handleMergingSettleMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
 	roomInfo, err := GetRoomInfo(rdb, roomID)
 	if err != nil {
 		log.Println("❌ 获取房间信息失败:", err)
@@ -684,10 +682,9 @@ func handleMergingSettleMessage(conn *websocket.Conn, rdb *redis.Client, roomID 
 			return
 		}
 	}
-	broadcastToRoom(roomID)
 }
 
-func handleCreateCompanyMessage(conn *websocket.Conn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
+func handleCreateCompanyMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
 	currentPlayer, err := GetCurrentPlayer(rdb, repository.Ctx, roomID)
 	if err != nil {
 		log.Println("❌ 获取当前玩家失败:", err)
@@ -798,6 +795,4 @@ func handleCreateCompanyMessage(conn *websocket.Conn, rdb *redis.Client, roomID 
 	// _ = rdb.Del(repository.Ctx, createTileKey).Err()
 	// Step 5:🔥 清除玩家的 tile
 	SetGameStatus(rdb, roomID, dto.RoomStatusBuyStock)
-	// Step 6: 通知前端更新（可选）
-	broadcastToRoom(roomID)
 }

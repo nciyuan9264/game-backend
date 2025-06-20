@@ -13,7 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func handlePlayAudioMessage(conn *websocket.Conn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
+func handlePlayAudioMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
 	audioType, ok := msgMap["payload"].(string)
 	if !ok {
 		log.Println("❌ 消息格式错误")
@@ -40,7 +40,7 @@ func handlePlayAudioMessage(conn *websocket.Conn, rdb *redis.Client, roomID stri
 	}
 }
 
-func handleRestartGameMessage(conn *websocket.Conn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
+func handleRestartGameMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
 	// 重置上次落子
 	if err := SetLastTileKey(rdb, repository.Ctx, roomID, playerID, ""); err != nil {
 		log.Println("❌ 设置最后放置的 tile 失败:", err)

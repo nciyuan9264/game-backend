@@ -18,6 +18,7 @@ type PlayerInfo struct {
 
 type CreateRoomRequest struct {
 	MaxPlayers int    `json:"maxPlayers" binding:"required"`
+	GameType   string `json:"gameType" binding:"required"`
 	UserID     string `json:"userID" binding:"required"`
 }
 

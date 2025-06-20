@@ -56,7 +56,7 @@ func getRoomPlayerCount(roomID string) int {
 	return onLineCount
 }
 
-func handleReadyMessage(conn *websocket.Conn, rdb *redis.Client, roomID, playerID string, msgMap map[string]interface{}) {
+func handleReadyMessage(conn ReadWriteConn, rdb *redis.Client, roomID, playerID string, msgMap map[string]interface{}) {
 	roomInfo, err := GetRoomInfo(repository.Rdb, roomID)
 	if err != nil {
 		log.Println("❌ 无法获取房间信息:", err)

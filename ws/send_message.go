@@ -3,6 +3,7 @@ package ws
 import (
 	"encoding/json"
 	"fmt"
+	"go-game/dto"
 	"go-game/entities"
 	"go-game/repository"
 	"go-game/utils"
@@ -58,7 +59,7 @@ func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[
 }
 
 // 向该客户端发送同步消息
-func SyncRoomMessage(conn *websocket.Conn, roomID string, playerID string, result map[string]int) error {
+func SyncRoomMessage(conn dto.ConnInterface, roomID string, playerID string, result map[string]int) error {
 	rdb := repository.Rdb
 	ctx := repository.Ctx
 

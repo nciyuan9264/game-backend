@@ -9,7 +9,6 @@ import (
 	"strconv"
 
 	"github.com/go-redis/redis/v8"
-	"github.com/gorilla/websocket"
 	"github.com/mitchellh/mapstructure"
 )
 
@@ -96,7 +95,11 @@ func UpdatePlayerStockAndMoney(rdb *redis.Client, ctx context.Context, roomID st
 	return nil
 }
 
-func handleBuyStockMessage(conn *websocket.Conn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
+type BuyStockRequest struct {
+	Stocks map[string]float64 `json:"stocks"`
+}
+
+func handleBuyStockMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
 	currentPlayer, err := GetCurrentPlayer(rdb, repository.Ctx, roomID)
 	if err != nil {
 		log.Println("❌ 获取当前玩家失败:", err)
@@ -116,17 +119,28 @@ func handleBuyStockMessage(conn *websocket.Conn, rdb *redis.Client, roomID strin
 		log.Println("❌ 不是 buyStock 的状态")
 		return
 	}
-	stocks, ok := msgMap["payload"].(map[string]interface{})
+	payloadMap, ok := msgMap["payload"].(map[string]interface{})
 	if !ok {
 		log.Println("❌ 股票数据格式错误")
 		return
+	}
+
+	stocks := make(map[string]int)
+
+	for k, v := range payloadMap {
+		// 判断 v 是不是 float64，再转换成 int
+		if f, ok := v.(float64); ok {
+			stocks[k] = int(f)
+		} else {
+			log.Printf("⚠️ 股票值类型错误: key=%s val=%v type=%T\n", k, v, v)
+		}
 	}
 
 	totalPrice := 0
 	priceMap := make(map[string]int)
 
 	for company, countVal := range stocks {
-		count := int(countVal.(float64))
+		count := countVal
 
 		// 获取股价
 		companyKey := fmt.Sprintf("room:%s:company:%s", roomID, company)
@@ -142,7 +156,7 @@ func handleBuyStockMessage(conn *websocket.Conn, rdb *redis.Client, roomID strin
 
 	// 遍历更新每个公司
 	for company, countVal := range stocks {
-		count := int(countVal.(float64))
+		count := countVal
 		for i := 0; i < count; i++ {
 			if err := UpdateCompanyStockAndTiles(rdb, roomID, company); err != nil {
 				log.Println("❌ 更新公司失败:", err)
@@ -153,7 +167,7 @@ func handleBuyStockMessage(conn *websocket.Conn, rdb *redis.Client, roomID strin
 
 	// 再统一扣钱 & 更新玩家股票
 	for company, countVal := range stocks {
-		count := int(countVal.(float64))
+		count := countVal
 		if err := UpdatePlayerStockAndMoney(rdb, repository.Ctx, roomID, playerID, company, count, priceMap[company]*count); err != nil {
 			log.Println("❌ 更新玩家失败:", err)
 			return

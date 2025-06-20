@@ -2,6 +2,7 @@ package ws
 
 import (
 	"fmt"
+	"go-game/dto"
 	"go-game/entities"
 	"go-game/repository"
 	"log"
@@ -89,12 +90,12 @@ func stringToIntHookFunc() mapstructure.DecodeHookFunc {
 }
 
 // GetConn 用于根据 roomID 和 playerID 获取对应的 WebSocket 连接
-func GetConn(roomID string, playerID string) (*websocket.Conn, error) {
+func GetConn(roomID string, playerID string) (dto.ConnInterface, error) {
 	players, ok := Rooms[roomID]
 	if !ok {
 		return nil, fmt.Errorf("房间[%s]不存在", roomID)
 	}
-	var conn *websocket.Conn
+	var conn dto.ConnInterface
 	for _, p := range players {
 		if p.PlayerID == playerID {
 			conn = p.Conn

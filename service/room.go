@@ -7,18 +7,19 @@ import (
 	"go-game/entities"
 	"go-game/repository"
 	"go-game/ws"
-	"strings"
-
-	"github.com/google/uuid"
+	"time"
 )
 
 func CreateRoom(params dto.CreateRoomRequest) (string, error) {
 	ctx := repository.Ctx
 	rdb := repository.Rdb
 
-	// 生成唯一 Room ID（例如 8位）
-	uuidStr := uuid.New().String()
-	roomID := strings.ReplaceAll(uuidStr, "-", "")[:8]
+	// 简洁的时间前缀：月日_时分秒
+	timePrefix := time.Now().Format("0102_150405")
+	// 生成 4 位随机码
+	randomSuffix := RandString(4)
+	// roomID 示例：0620_153045_dA9X
+	roomID := fmt.Sprintf("%s_%s", timePrefix, randomSuffix)
 
 	// 初始化房间信息
 	err := ws.SetRoomInfo(rdb, repository.Ctx, roomID, entities.RoomInfo{
@@ -106,8 +107,11 @@ func CreateRoom(params dto.CreateRoomRequest) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("tile 初始化 Redis 写入失败: %w", err)
 	}
-
 	ws.Rooms[roomID] = []dto.PlayerConn{}
+
+	if params.GameType == "ai" {
+		ws.JoinRoomAsAI(roomID, "ai_001")
+	}
 	return roomID, nil
 }
 

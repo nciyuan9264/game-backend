@@ -82,7 +82,7 @@ func cleanupOnDisconnect(roomID, playerID string, conn *websocket.Conn) {
 }
 
 // 消息处理函数类型
-type messageHandler func(conn *websocket.Conn, rdb *redis.Client, roomID, playerID string, msgMap map[string]interface{})
+type messageHandler func(conn ReadWriteConn, rdb *redis.Client, roomID, playerID string, msgMap map[string]interface{})
 
 // 消息处理函数映射
 var messageHandlers = map[string]messageHandler{
@@ -98,7 +98,19 @@ var messageHandlers = map[string]messageHandler{
 }
 
 // 持续监听客户端消息，并将其广播给房间内其他玩家
-func listenAndBroadcastMessages(conn *websocket.Conn, roomID, playerID string) {
+type WriteOnlyConn interface {
+	WriteMessage(messageType int, data []byte) error
+	Close() error
+}
+
+// 读写接口，供真实客户端连接用，支持读取消息
+type ReadWriteConn interface {
+	WriteOnlyConn
+	ReadMessage() (messageType int, p []byte, err error)
+}
+
+// 修改listenAndBroadcastMessages签名，接收读写接口
+func listenAndBroadcastMessages(conn ReadWriteConn, roomID, playerID string) {
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
