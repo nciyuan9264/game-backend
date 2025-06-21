@@ -9,6 +9,8 @@ services:
     environment:
       - REDIS_ADDR=redis:6379
     restart: always
+    volumes:
+      - /var/log/go-game:/app/game_logs  # 宿主机:容器路径
 
   redis:
     image: redis:7

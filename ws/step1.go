@@ -718,6 +718,10 @@ func handleCreateCompanyMessage(conn ReadWriteConn, rdb *redis.Client, roomID st
 
 	// 获取公司 Hash 数据
 	companyMap, err := rdb.HGetAll(repository.Ctx, companyKey).Result()
+	if err != nil {
+		log.Println("❌ 获取公司 Hash 数据失败:", err)
+		return
+	}
 	if len(companyMap) == 0 {
 		log.Println("❌ 公司 Hash 数据为空")
 		return
