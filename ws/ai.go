@@ -358,15 +358,15 @@ func MaybeRunAIIfNeeded(roomID string, data []byte) bool {
 	}
 	if isAllTileUsed {
 		log.Println("❌ 所有 tile 已被使用")
-		time.Sleep(3 * time.Second)
-		SetGameStatus(repository.Rdb, roomID, dto.RoomStatusEnd)
+		// time.Sleep(3 * time.Second)
+		// SetGameStatus(repository.Rdb, roomID, dto.RoomStatusEnd)
 	}
 
 	log.Printf("🤖 当前是 AI 玩家 %s 的回合，状态为 %s，准备延迟执行 AI 行动...", playerId, gameStatus)
 
 	// ---------- 在协程中延迟执行 ----------
 	go func() {
-		time.Sleep(1 * time.Second)
+		time.Sleep(5 * time.Second)
 
 		conn := &VirtualConn{PlayerID: currentPlayerID, RoomID: roomID}
 		rdb := repository.Rdb
