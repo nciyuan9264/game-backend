@@ -1,0 +1,128 @@
+package service
+
+import (
+	"fmt"
+	"go-game/dto"
+	"go-game/entities"
+	"go-game/repository"
+	"go-game/ws"
+	"time"
+)
+
+func CreateRoom(params dto.CreateRoomRequest) (string, error) {
+	rdb := repository.Rdb
+
+	// 简洁的时间前缀：月日_时分秒
+	timePrefix := time.Now().Format("0102_150405")
+	// 生成 4 位随机码
+	randomSuffix := RandString(4)
+	// roomID 示例：0620_153045_dA9X
+	roomID := fmt.Sprintf("%s_%s", timePrefix, randomSuffix)
+
+	// 初始化房间信息
+	err := ws.SetRoomInfo(rdb, repository.Ctx, roomID, entities.RoomInfo{
+		MaxPlayers: params.MaxPlayers,
+		GameStatus: entities.RoomStatusWaiting,
+		RoomStatus: false,
+		UserID:     params.UserID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("初始化房间信息失败: %w", err)
+	}
+	ws.InitRoomData(roomID)
+	ws.Rooms[roomID] = []dto.PlayerConn{}
+
+	// for i := 1; i <= params.AiCount; i++ {
+	// 	ws.JoinRoomAsAI(roomID, fmt.Sprintf("ai_%03d", i))
+	// }
+
+	// if params.AiCount > 0 {
+	// 	ws.JoinRoomAsAI(roomID, "ai_001")
+	// ws.JoinRoomAsAI(roomID, "ai_002")
+	// err := ws.SetCurrentPlayer(repository.Rdb, repository.Ctx, roomID, "ai_001")
+	// if err != nil {
+	// 	log.Println("❌ 设置当前玩家失败:", err)
+	// }
+	// err = ws.SetRoomStatus(repository.Rdb, roomID, true)
+	// if err != nil {
+	// 	log.Println("❌ 设置房间状态失败:", err)
+	// }
+	// ws.BroadcastToRoom(roomID)
+	// }
+	return roomID, nil
+}
+
+func DeleteRoom(params dto.DeleteRoomRequest) error {
+	ctx := repository.Ctx
+	rdb := repository.Rdb
+
+	// 用 SCAN 查找所有以 room:{RoomID}: 开头的 key
+	prefix := fmt.Sprintf("room:%s:", params.RoomID)
+	var cursor uint64
+	var keysToDelete []string
+
+	for {
+		keys, cur, err := rdb.Scan(ctx, cursor, prefix+"*", 100).Result()
+		if err != nil {
+			return fmt.Errorf("扫描房间相关 key 失败: %w", err)
+		}
+		keysToDelete = append(keysToDelete, keys...)
+		cursor = cur
+		if cursor == 0 {
+			break
+		}
+	}
+
+	if len(keysToDelete) == 0 {
+		return fmt.Errorf("房间不存在或无相关数据")
+	}
+
+	// 批量删除这些 key
+	if _, err := rdb.Del(ctx, keysToDelete...).Result(); err != nil {
+		return fmt.Errorf("删除房间相关 key 失败: %w", err)
+	}
+	delete(ws.Rooms, params.RoomID)
+
+	return nil
+}
+
+func GetRoomList() ([]dto.RoomInfo, error) {
+	var rooms []dto.RoomInfo
+	for roomID, roomConnInfo := range ws.Rooms {
+		roomPlayers := make([]dto.RoomPlayer, 0, len(roomConnInfo))
+		for _, player := range roomConnInfo {
+			roomPlayers = append(roomPlayers, dto.RoomPlayer{
+				PlayerID: player.PlayerID,
+				Online:   player.Online,
+			})
+		}
+
+		roomInfo, err := ws.GetRoomInfo(roomID)
+		if err != nil {
+			delete(ws.Rooms, roomID)
+			continue
+		}
+		room := dto.RoomInfo{
+			RoomID:     roomID,
+			UserID:     roomInfo.UserID,
+			MaxPlayers: roomInfo.MaxPlayers,
+			Status:     roomInfo.RoomStatus,
+			RoomPlayer: roomPlayers,
+		}
+		rooms = append(rooms, room)
+	}
+
+	return rooms, nil
+}
+
+func GetOnlinePlayer() (int, error) {
+	onlinePlayer := 0
+	for _, room := range ws.Rooms {
+		for _, player := range room {
+			if player.Online {
+				onlinePlayer++
+			}
+		}
+	}
+	return onlinePlayer, nil
+}

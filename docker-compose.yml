@@ -1,19 +1,51 @@
-version: "3.8"
+version: '3.8'
 services:
-  go-game:
-    build: .
+  acquire:
+    build:
+      context: ./acquire
     ports:
-      - "8000:8000"
-    depends_on:
-      - redis
+      - '8001:8000' # 容器内部仍然是8000
     environment:
       - REDIS_ADDR=redis:6379
-    restart: always
+      - REDIS_DB=0
     volumes:
-      - /var/log/go-game:/app/game_logs  # 宿主机:容器路径
+      - /var/log/acquire:/app/game_logs
+    depends_on:
+      - redis
+    restart: always
+
+  splendor:
+    build:
+      context: ./splendor
+    ports:
+      - '8002:8000'
+    environment:
+      - REDIS_ADDR=redis:6379
+      - REDIS_DB=1
+    volumes:
+      - /var/log/splendor:/app/game_logs
+    depends_on:
+      - redis
+    restart: always
 
   redis:
     image: redis:7
     ports:
-      - "6379:6379"
+      - '6379:6379'
     restart: always
+
+  nginx:
+    container_name: backend-nginx
+    image: nginx:latest
+    ports:
+      - '8000:8000'
+    volumes:
+      - ./nginx/:/etc/nginx/conf.d/:ro
+    depends_on:
+      - acquire
+      - splendor
+
+
+networks:
+  game-network:
+    driver: bridge
