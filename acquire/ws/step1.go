@@ -80,6 +80,7 @@ func handleMergeProcess(
 		sort.Slice(holders, func(i, j int) bool {
 			return holders[i].Count > holders[j].Count
 		})
+
 		// 保存拥有当前公司股票的所有玩家
 		currentCompanyHoders := make([]string, 0)
 		for _, holder := range holders {
@@ -87,23 +88,59 @@ func handleMergeProcess(
 		}
 
 		stockInfo := utils.GetStockInfo(mainHotel, tileCount)
-		// Step 4：计算红利（根据 tileCount 和规则，这里举例用 100 * tileCount 为总红利）
 		firstBonus := stockInfo.BonusFirst
 		secondBonus := stockInfo.BonusSecond
 
 		dividends := make(map[string]int)
 
-		if len(holders) == 1 {
-			dividends[holders[0].PlayerID] = firstBonus
-		} else {
-			if holders[0].Count == holders[1].Count {
-				dividends[holders[0].PlayerID] = (firstBonus + secondBonus) / 2
-				dividends[holders[1].PlayerID] = (firstBonus + secondBonus) / 2
+		// Step 4：分红逻辑
+		firstGroup := []string{holders[0].PlayerID}
+		firstCount := holders[0].Count
+
+		// 找出第一名的并列玩家
+		for i := 1; i < len(holders); i++ {
+			if holders[i].Count == firstCount {
+				firstGroup = append(firstGroup, holders[i].PlayerID)
 			} else {
-				dividends[holders[0].PlayerID] = firstBonus
-				dividends[holders[1].PlayerID] = secondBonus
+				break
 			}
 		}
+
+		if len(firstGroup) > 1 {
+			// 并列第一名：平分总红利（first + second）
+			totalBonus := firstBonus + secondBonus
+			each := totalBonus / len(firstGroup)
+			for _, pid := range firstGroup {
+				dividends[pid] = each
+			}
+		} else {
+			// 第一名独占
+			dividends[firstGroup[0]] = firstBonus
+
+			// 找第二名（可能并列）
+			secondGroup := []string{}
+			secondCount := -1
+			for i := 1; i < len(holders); i++ {
+				if holders[i].Count < firstCount {
+					if secondCount == -1 {
+						secondCount = holders[i].Count
+					}
+					if holders[i].Count == secondCount {
+						secondGroup = append(secondGroup, holders[i].PlayerID)
+					} else {
+						break
+					}
+				}
+			}
+
+			if len(secondGroup) > 0 {
+				each := secondBonus / len(secondGroup)
+				for _, pid := range secondGroup {
+					dividends[pid] = each
+				}
+			}
+		}
+
 		for playerID, money := range dividends {
 			if err := AddPlayerMoney(rdb, repository.Ctx, roomID, playerID, money); err != nil {
 				log.Println("❌ 累加红利失败:", err)
