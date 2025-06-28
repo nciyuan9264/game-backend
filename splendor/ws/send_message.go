@@ -169,9 +169,16 @@ func BroadcastToRoom(roomID string) {
 		}
 
 		if playerScore >= 15 && roomInfo.GameStatus == entities.RoomStatusPlaying {
-			err := SetGameStatus(repository.Rdb, roomID, entities.RoomStatusLastTurn)
-			if err != nil {
-				log.Println("设置游戏状态失败:", err)
+			if currentPlayer != firstPlayer {
+				err := SetGameStatus(repository.Rdb, roomID, entities.RoomStatusLastTurn)
+				if err != nil {
+					log.Println("设置游戏状态失败:", err)
+				}
+			} else {
+				err := SetGameStatus(repository.Rdb, roomID, entities.RoomStatusEnd)
+				if err != nil {
+					log.Println("设置游戏状态失败:", err)
+				}
 			}
 		}
 	}

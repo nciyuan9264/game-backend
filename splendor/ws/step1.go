@@ -4,6 +4,7 @@ import (
 	"go-game/entities"
 	"go-game/repository"
 	"log"
+	"math/rand"
 	"strconv"
 
 	"github.com/go-redis/redis/v8"
@@ -141,7 +142,19 @@ func handleBuyCardMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, 
 		if err != nil {
 			return
 		}
-		for _, c := range allCards {
+		// 1. 将 map 转换为 slice
+		cardList := make([]entities.NormalCard, 0, len(allCards))
+		for _, card := range allCards {
+			cardList = append(cardList, card)
+		}
+
+		// 2. 打乱顺序
+		rand.Shuffle(len(cardList), func(i, j int) {
+			cardList[i], cardList[j] = cardList[j], cardList[i]
+		})
+
+		// 3. 遍历打乱后的 cardList 来做查找/操作
+		for _, c := range cardList {
 			if c.State == entities.CardStateHidden && c.Level == card.Level {
 				c.State = entities.CardStateRevealed
 				if err := SetNormalCardByID(roomID, &c); err != nil {
@@ -372,7 +385,19 @@ func handleReserveCardMessage(conn ReadWriteConn, rdb *redis.Client, roomID stri
 		return
 	}
 
-	for _, c := range allCards {
+	// 1. 将 map 转换为 slice
+	cardList := make([]entities.NormalCard, 0, len(allCards))
+	for _, card := range allCards {
+		cardList = append(cardList, card)
+	}
+
+	// 2. 打乱顺序
+	rand.Shuffle(len(cardList), func(i, j int) {
+		cardList[i], cardList[j] = cardList[j], cardList[i]
+	})
+
+	// 3. 遍历打乱后的 cardList 来做查找/操作
+	for _, c := range cardList {
 		if c.State == entities.CardStateHidden && c.Level == card.Level {
 			c.State = entities.CardStateRevealed
 			if err := SetNormalCardByID(roomID, &c); err != nil {

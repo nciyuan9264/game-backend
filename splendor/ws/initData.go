@@ -113,7 +113,7 @@ func InitPlayerDataToRedis(roomID, playerID string) error {
 
 	// 初始化预留卡牌
 	reserveCard := []entities.NormalCard{}
-	if err := SetPlayerReserveCards("room123", playerID, reserveCard); err != nil {
+	if err := SetPlayerReserveCards(roomID, playerID, reserveCard); err != nil {
 		log.Println("设置预定卡牌失败:", err)
 	}
 
