@@ -42,10 +42,15 @@ func handleBuyCardMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, 
 		log.Println("❌ 获取玩家宝石失败:", err)
 		return
 	}
-	playerCard, err := GetPlayerCard(roomID, playerID)
+	playerCard, err := GetPlayerNormalCard(roomID, playerID)
 	if err != nil {
 		log.Println("❌ 获取玩家卡牌失败:", err)
 		return
+	}
+
+	cardCount := make(map[string]int)
+	for _, c := range playerCard {
+		cardCount[c.Bonus]++
 	}
 
 	// 4. 检查是否能支付
@@ -55,13 +60,13 @@ func handleBuyCardMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, 
 
 	canBuy := true
 	for color, cost := range required {
-		owned := playerGems[color] + playerCard[color]
+		owned := playerGems[color] + cardCount[color]
 		if owned >= cost {
-			paidGems[color] = cost - playerCard[color]
+			paidGems[color] = cost - cardCount[color]
 		} else {
-			needGold := cost - owned - playerCard[color]
+			needGold := cost - owned - cardCount[color]
 			if remainingGold >= needGold {
-				paidGems[color] = owned - playerCard[color]
+				paidGems[color] = owned - cardCount[color]
 				paidGems["Gold"] += needGold
 				remainingGold -= needGold
 			} else {
@@ -102,15 +107,15 @@ func handleBuyCardMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, 
 	}
 
 	// 7. 玩家获得该颜色卡牌加 1（假设 SetPlayerCard 函数存在）
-	playerCards, err := GetPlayerCard(roomID, playerID)
+	playerCards, err := GetPlayerNormalCard(roomID, playerID)
 	if err != nil {
 		log.Println("❌ 获取玩家卡牌失败:", err)
 		return
 	}
 
-	playerCards[card.Bonus] += 1
+	playerCards = append(playerCards, *card)
 
-	if err := SetPlayerCard(roomID, playerID, playerCards); err != nil {
+	if err := SetPlayerNormalCard(roomID, playerID, playerCards); err != nil {
 		log.Println("❌ 设置玩家卡牌失败:", err)
 		return
 	}
@@ -175,17 +180,22 @@ func handleBuyCardMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, 
 	}
 
 	// 2. 获取玩家已有的卡牌数量
-	playerCards, err = GetPlayerCard(roomID, playerID)
+	playerCards, err = GetPlayerNormalCard(roomID, playerID)
 	if err != nil {
 		log.Printf("获取玩家卡牌失败: %v", err)
 		return
+	}
+
+	cardCount = make(map[string]int)
+	for _, card := range playerCards {
+		cardCount[card.Bonus]++
 	}
 
 	// 3. 遍历所有 revealed 的贵族卡，判断是否满足条件
 	for _, noble := range revealedNobles {
 		satisfy := true
 		for color, required := range noble.Cost {
-			if playerCards[color] < required {
+			if cardCount[color] < required {
 				satisfy = false
 				break
 			}

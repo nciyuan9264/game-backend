@@ -12,32 +12,34 @@ import (
 )
 
 // SetJSONToRedisHash 将任意结构体序列化为 JSON 存入 Redis 哈希的 "data" 字段
-func SetPlayerCard(roomID, playerID string, value map[string]int) error {
-	playerCardKey := fmt.Sprintf("room:%s:player:%s:card", roomID, playerID)
+func SetPlayerNormalCard(roomID, playerID string, value []entities.NormalCard) error {
+	playerNormalCardKey := fmt.Sprintf("room:%s:player:%s:normalCard", roomID, playerID)
 	bytes, err := json.Marshal(value)
 	if err != nil {
-		return err
+		return fmt.Errorf("序列化玩家预留贵族卡失败: %w", err)
 	}
-	return repository.Rdb.HSet(repository.Ctx, playerCardKey, "data", bytes).Err()
+
+	return repository.Rdb.HSet(repository.Ctx, playerNormalCardKey, "data", bytes).Err()
 }
 
 // GetJSONFromRedisHash 从 Redis 哈希的 "data" 字段获取并反序列化为传入的目标结构
-func GetPlayerCard(roomID, playerID string) (map[string]int, error) {
-	playerCardKey := fmt.Sprintf("room:%s:player:%s:card", roomID, playerID)
+func GetPlayerNormalCard(roomID, playerID string) ([]entities.NormalCard, error) {
+	playerNormalCardKey := fmt.Sprintf("room:%s:player:%s:normalCard", roomID, playerID)
 
-	// 从 Redis 获取字符串形式的 JSON 数据
-	val, err := repository.Rdb.HGet(repository.Ctx, playerCardKey, "data").Result()
-	if err != nil {
+	val, err := repository.Rdb.HGet(repository.Ctx, playerNormalCardKey, "data").Result()
+	if err != redis.Nil && err != nil {
 		return nil, err
 	}
-
-	// 反序列化为 map[string]int
-	var cards map[string]int
-	if err := json.Unmarshal([]byte(val), &cards); err != nil {
-		return nil, err
+	if err == redis.Nil {
+		return []entities.NormalCard{}, fmt.Errorf("获取玩家normal卡失败: %w", err)
 	}
 
-	return cards, nil
+	var reserve []entities.NormalCard
+	if err := json.Unmarshal([]byte(val), &reserve); err != nil {
+		return nil, fmt.Errorf("反序列化玩家normal卡失败: %w", err)
+	}
+
+	return reserve, nil
 }
 
 func SetPlayerNobleCard(roomID, playerID string, value []entities.NobleCard) error {
@@ -62,7 +64,6 @@ func GetPlayerNobleCard(roomID, playerID string) ([]entities.NobleCard, error) {
 		return []entities.NobleCard{}, nil
 	}
 
-	// 反序列化为 map[string]int
 	var nobleCards []entities.NobleCard
 	if err := json.Unmarshal([]byte(val), &nobleCards); err != nil {
 		return nil, err

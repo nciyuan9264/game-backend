@@ -3,6 +3,7 @@ package ws
 import (
 	"fmt"
 	"go-game/dto"
+	"go-game/entities"
 	"go-game/repository"
 	"log"
 	"time"
@@ -72,6 +73,12 @@ func handleReadyMessage(conn ReadWriteConn, rdb *redis.Client, roomID, playerID 
 		err := SetRoomStatus(repository.Rdb, roomID, true)
 		if err != nil {
 			log.Println("❌ 设置房间状态失败:", err)
+			return
+		}
+
+		err = SetGameStatus(repository.Rdb, roomID, entities.RoomStatusPlaying)
+		if err != nil {
+			log.Println("❌ 设置游戏状态失败:", err)
 			return
 		}
 

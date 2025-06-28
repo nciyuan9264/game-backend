@@ -85,12 +85,14 @@ func SyncRoomMessage(conn dto.ConnInterface, roomID string, playerID string) err
 
 	playersData := make(map[string]dto.SplendorPlayerData)
 	for _, pc := range Rooms[roomID] {
-		playerCard, _ := GetPlayerCard(roomID, pc.PlayerID)
+		playerNormalCard, _ := GetPlayerNormalCard(roomID, pc.PlayerID)
 		playerGem, _ := GetPlayerGem(roomID, pc.PlayerID)
 		playerScore, _ := GetPlayerScore(roomID, pc.PlayerID)
 		reserveCards, _ := GetPlayerReserveCards(roomID, pc.PlayerID)
+		nobleCard, _ := GetPlayerNobleCard(roomID, pc.PlayerID)
 		playerInfo := dto.SplendorPlayerData{
-			Card:        playerCard,
+			NormalCard:  playerNormalCard,
+			NobleCard:   nobleCard,
 			Gem:         playerGem,
 			Score:       playerScore,
 			ReserveCard: reserveCards,
@@ -148,7 +150,7 @@ func BroadcastToRoom(roomID string) {
 	}
 	for _, pc := range Rooms[roomID] {
 		playerScore := 0
-		playerNormalCard, err := GetPlayerCard(roomID, pc.PlayerID)
+		playerNormalCard, err := GetPlayerNormalCard(roomID, pc.PlayerID)
 		if err != nil {
 			log.Println("获取玩家卡牌失败:", err)
 		}
@@ -159,14 +161,14 @@ func BroadcastToRoom(roomID string) {
 		for _, noble := range playerNobleCard {
 			playerScore += noble.Points
 		}
-		for _, count := range playerNormalCard {
-			playerScore += count
+		for _, card := range playerNormalCard {
+			playerScore += card.Points
 		}
 		if err := SetPlayerScore(roomID, pc.PlayerID, playerScore); err != nil {
 			log.Println("设置分数失败:", err)
 		}
 
-		if pc.PlayerID == currentPlayer && playerScore >= 15 {
+		if playerScore >= 15 && roomInfo.GameStatus == entities.RoomStatusPlaying {
 			err := SetGameStatus(repository.Rdb, roomID, entities.RoomStatusLastTurn)
 			if err != nil {
 				log.Println("设置游戏状态失败:", err)

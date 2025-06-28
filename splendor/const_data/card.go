@@ -19,7 +19,7 @@ var SplendorCards = map[int][]entities.NormalCard{
 		{ID: 10, Level: 1, Bonus: "Blue", Points: 0, Cost: map[string]int{"Green": 2, "Red": 2, "White": 1}, State: entities.CardStateHidden},
 		{ID: 11, Level: 1, Bonus: "Blue", Points: 0, Cost: map[string]int{"Blue": 1, "Green": 3, "Red": 1}, State: entities.CardStateHidden},
 		{ID: 12, Level: 1, Bonus: "Blue", Points: 0, Cost: map[string]int{"Black": 2, "White": 1}, State: entities.CardStateHidden},
-		{ID: 13, Level: 1, Bonus: "极", Points: 0, Cost: map[string]int{"Black": 2, "Green": 2}, State: entities.CardStateHidden},
+		{ID: 13, Level: 1, Bonus: "Blue", Points: 0, Cost: map[string]int{"Black": 2, "Green": 2}, State: entities.CardStateHidden},
 		{ID: 14, Level: 1, Bonus: "Blue", Points: 0, Cost: map[string]int{"Black": 3}, State: entities.CardStateHidden},
 		{ID: 15, Level: 1, Bonus: "Blue", Points: 1, Cost: map[string]int{"Red": 4}, State: entities.CardStateHidden},
 		{ID: 16, Level: 1, Bonus: "White", Points: 0, Cost: map[string]int{"Black": 1, "Blue": 1, "Green": 1, "Red": 1}, State: entities.CardStateHidden},
@@ -84,7 +84,7 @@ var SplendorCards = map[int][]entities.NormalCard{
 	3: {
 		{ID: 70, Level: 3, Bonus: "Black", Points: 3, Cost: map[string]int{"Blue": 3, "Green": 5, "Red": 3, "White": 3}, State: entities.CardStateHidden},
 		{ID: 71, Level: 3, Bonus: "Black", Points: 4, Cost: map[string]int{"Red": 7}, State: entities.CardStateHidden},
-		{ID: 72, Level: 3, Bonus: "Black", Points: 4, Cost: map[string]int{"Black": 3, "Green": 3, "极": 6}, State: entities.CardStateHidden},
+		{ID: 72, Level: 3, Bonus: "Black", Points: 4, Cost: map[string]int{"Black": 3, "Green": 3, "Red": 6}, State: entities.CardStateHidden},
 		{ID: 73, Level: 3, Bonus: "Black", Points: 5, Cost: map[string]int{"Black": 3, "Red": 7}, State: entities.CardStateHidden},
 		{ID: 74, Level: 3, Bonus: "Blue", Points: 3, Cost: map[string]int{"Black": 5, "Green": 3, "Red": 3, "White": 3}, State: entities.CardStateHidden},
 		{ID: 75, Level: 3, Bonus: "Blue", Points: 4, Cost: map[string]int{"White": 7}, State: entities.CardStateHidden},

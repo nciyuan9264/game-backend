@@ -84,15 +84,13 @@ func InitRoomData(roomID string) error {
 
 func InitPlayerDataToRedis(roomID, playerID string) error {
 	// 初始化卡牌
-	initCard := map[string]int{
-		"Red":   0,
-		"Green": 0,
-		"White": 0,
-		"Blue":  0,
-		"Black": 0,
-		"Gold":  0,
+	initNormalCard := []entities.NormalCard{}
+	if err := SetPlayerNormalCard(roomID, playerID, initNormalCard); err != nil {
+		log.Fatal(err)
 	}
-	if err := SetPlayerCard(roomID, playerID, initCard); err != nil {
+
+	initNobleCard := []entities.NobleCard{}
+	if err := SetPlayerNobleCard(roomID, playerID, initNobleCard); err != nil {
 		log.Fatal(err)
 	}
 
@@ -115,7 +113,7 @@ func InitPlayerDataToRedis(roomID, playerID string) error {
 
 	// 初始化预留卡牌
 	reserveCard := []entities.NormalCard{}
-	if err := SetPlayerReserveCards("room123", "player1", reserveCard); err != nil {
+	if err := SetPlayerReserveCards("room123", playerID, reserveCard); err != nil {
 		log.Println("设置预定卡牌失败:", err)
 	}
 
