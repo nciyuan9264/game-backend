@@ -65,9 +65,9 @@ func handleBuyCardMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, 
 		if owned >= cost {
 			paidGems[color] = cost - cardCount[color]
 		} else {
-			needGold := cost - owned - cardCount[color]
+			needGold := cost - owned
 			if remainingGold >= needGold {
-				paidGems[color] = owned - cardCount[color]
+				paidGems[color] = playerGems[color]
 				paidGems["Gold"] += needGold
 				remainingGold -= needGold
 			} else {

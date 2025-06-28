@@ -11,6 +11,24 @@ import (
 	"golang.org/x/exp/rand"
 )
 
+func GetRandomNobles(max int) []entities.NobleCard {
+	nobleList := make([]entities.NobleCard, len(const_data.NobleTilesList))
+	copy(nobleList, const_data.NobleTilesList)
+
+	// 打乱
+	rand.Shuffle(len(nobleList), func(i, j int) {
+		nobleList[i], nobleList[j] = nobleList[j], nobleList[i]
+	})
+
+	// 设置状态
+	for i := range nobleList {
+		if i < max {
+			nobleList[i].State = entities.CardStateRevealed
+		}
+	}
+
+	return nobleList
+}
 func InitRoomData(roomID string) error {
 	roomInfo, err := GetRoomInfo(roomID)
 	if err != nil {
@@ -58,22 +76,19 @@ func InitRoomData(roomID string) error {
 		}
 	}
 	noblesKey := fmt.Sprintf("room:%s:nobles", roomID)
-	randomNobleTilesList := rand.Perm(len(const_data.NobleTilesList))
+	randomNobles := GetRandomNobles(roomInfo.MaxPlayers + 1)
+
 	pipe = repository.Rdb.Pipeline()
-
-	for idx, nobleIdx := range randomNobleTilesList {
-		noble := const_data.NobleTilesList[nobleIdx] // ✅ 获取实际 NobleCard
-
-		if idx < roomInfo.MaxPlayers+1 {
-			noble.State = entities.CardStateRevealed // ✅ 设置为可展示
-		}
-
-		nobleJSON, err := json.Marshal(noble) // ✅ 放在设置 State 后面
+	for _, noble := range randomNobles {
+		nobleJSON, err := json.Marshal(noble)
 		if err != nil {
 			return fmt.Errorf("贵族瓷砖序列化失败: %w", err)
 		}
-
-		pipe.HSet(repository.Ctx, noblesKey, noble.ID, nobleJSON) // ✅ pipeline 写入
+		pipe.HSet(repository.Ctx, noblesKey, noble.ID, nobleJSON)
+	}
+	_, err = pipe.Exec(repository.Ctx)
+	if err != nil {
+		log.Println("❌ pipeline 写入 nobles 失败:", err)
 	}
 
 	if _, err := pipe.Exec(repository.Ctx); err != nil {
