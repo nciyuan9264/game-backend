@@ -108,6 +108,12 @@ func SyncRoomMessage(conn dto.ConnInterface, roomID string, playerID string) err
 			revealedNobles = append(revealedNobles, noble)
 		}
 	}
+
+	lastData, err := GetLastData(roomID, playerID)
+	if err != nil {
+		return fmt.Errorf("❌ 获取上次操作失败: %w", err)
+	}
+
 	// ------- 组装消息 -------
 	msg := map[string]interface{}{
 		"type":       "sync",
@@ -119,6 +125,7 @@ func SyncRoomMessage(conn dto.ConnInterface, roomID string, playerID string) err
 			"nobles":        revealedNobles,
 			"roomInfo":      roomInfo,
 			"currentPlayer": currentPlayer,
+			"lastData":      lastData,
 		},
 	}
 

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-game/repository"
+
+	"github.com/go-redis/redis/v8"
 )
 
 type LastAction struct {
@@ -32,17 +34,18 @@ func SetLastData(roomID, playerID string, action string, payload interface{}) er
 		return fmt.Errorf("序列化 LastAction 失败: %w", err)
 	}
 
-	field := fmt.Sprintf("player:%s", playerID)
-	return repository.Rdb.HSet(repository.Ctx, lastDataKey, field, bytes).Err()
+	return repository.Rdb.HSet(repository.Ctx, lastDataKey, "data", bytes).Err()
 }
 
 func GetLastData(roomID, playerID string) (*LastAction, error) {
 	lastDataKey := fmt.Sprintf("room:%s:last_data", roomID)
-	field := fmt.Sprintf("player:%s", playerID)
 
-	val, err := repository.Rdb.HGet(repository.Ctx, lastDataKey, field).Result()
-	if err != nil {
+	val, err := repository.Rdb.HGet(repository.Ctx, lastDataKey, "data").Result()
+	if err != nil && err != redis.Nil {
 		return nil, err
+	}
+	if val == "" {
+		return nil, nil
 	}
 
 	var action LastAction

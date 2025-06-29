@@ -3,7 +3,6 @@ package ws
 import (
 	"encoding/json"
 	"go-game/entities"
-	"go-game/repository"
 	"log"
 	"time"
 
@@ -12,15 +11,6 @@ import (
 )
 
 func handlePlayAudioMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
-	currentPlayer, err := GetCurrentPlayer(rdb, repository.Ctx, roomID)
-	if err != nil {
-		log.Println("❌ 获取当前玩家失败:", err)
-		return
-	}
-	if currentPlayer != playerID {
-		log.Println("❌ 不是当前玩家的回合")
-	}
-
 	audioType, ok := msgMap["payload"].(string)
 	if !ok {
 		log.Println("❌ 消息格式错误")

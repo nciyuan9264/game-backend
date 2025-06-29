@@ -63,7 +63,9 @@ func handleBuyCardMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, 
 	for color, cost := range required {
 		owned := playerGems[color] + cardCount[color]
 		if owned >= cost {
-			paidGems[color] = cost - cardCount[color]
+			if cardCount[color] < cost {
+				paidGems[color] = cost - cardCount[color]
+			}
 		} else {
 			needGold := cost - owned
 			if remainingGold >= needGold {
@@ -226,6 +228,10 @@ func handleBuyCardMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, 
 
 			// 添加到玩家的 noble 列表中
 			playerNobleCards = append(playerNobleCards, noble)
+			// 发送消息给客户端，通知玩家获得了新的 noble
+			handlePlayAudioMessage(conn, rdb, roomID, playerID, map[string]interface{}{
+				"payload": "get-noble-card",
+			})
 		}
 	}
 
