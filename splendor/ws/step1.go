@@ -10,7 +10,6 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-// 处理玩家放置 tile 消息
 func handleBuyCardMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
 	currentPlayer, err := GetCurrentPlayer(rdb, repository.Ctx, roomID)
 	if err != nil {

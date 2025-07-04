@@ -27,19 +27,19 @@ func GetPlayerNormalCard(roomID, playerID string) ([]entities.NormalCard, error)
 	playerNormalCardKey := fmt.Sprintf("room:%s:player:%s:normalCard", roomID, playerID)
 
 	val, err := repository.Rdb.HGet(repository.Ctx, playerNormalCardKey, "data").Result()
-	if err != redis.Nil && err != nil {
+	if err == redis.Nil {
+		return []entities.NormalCard{}, nil
+	}
+	if err != nil {
 		return nil, err
 	}
-	if err == redis.Nil {
-		return []entities.NormalCard{}, fmt.Errorf("获取玩家normal卡失败: %w", err)
-	}
 
-	var reserve []entities.NormalCard
-	if err := json.Unmarshal([]byte(val), &reserve); err != nil {
+	var normalCards []entities.NormalCard
+	if err := json.Unmarshal([]byte(val), &normalCards); err != nil {
 		return nil, fmt.Errorf("反序列化玩家normal卡失败: %w", err)
 	}
 
-	return reserve, nil
+	return normalCards, nil
 }
 
 func SetPlayerNobleCard(roomID, playerID string, value []entities.NobleCard) error {
@@ -53,15 +53,15 @@ func SetPlayerNobleCard(roomID, playerID string, value []entities.NobleCard) err
 
 // GetJSONFromRedisHash 从 Redis 哈希的 "data" 字段获取并反序列化为传入的目标结构
 func GetPlayerNobleCard(roomID, playerID string) ([]entities.NobleCard, error) {
-	playerCardKey := fmt.Sprintf("room:%s:player:%s:nobleCard", roomID, playerID)
+	playerNobleCardKey := fmt.Sprintf("room:%s:player:%s:nobleCard", roomID, playerID)
 
 	// 从 Redis 获取字符串形式的 JSON 数据
-	val, err := repository.Rdb.HGet(repository.Ctx, playerCardKey, "data").Result()
-	if err != nil && err != redis.Nil {
-		return nil, err
-	}
+	val, err := repository.Rdb.HGet(repository.Ctx, playerNobleCardKey, "data").Result()
 	if err == redis.Nil {
 		return []entities.NobleCard{}, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	var nobleCards []entities.NobleCard
@@ -85,6 +85,10 @@ func GetPlayerGem(roomID, playerID string) (map[string]int, error) {
 	key := fmt.Sprintf("room:%s:player:%s:gem", roomID, playerID)
 
 	val, err := repository.Rdb.HGet(repository.Ctx, key, "data").Result()
+	if err == redis.Nil {
+		// 说明字段不存在，直接返回空列表，不报错
+		return map[string]int{}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -108,6 +112,10 @@ func GetPlayerScore(roomID, playerID string) (int, error) {
 	key := fmt.Sprintf("room:%s:player:%s:score", roomID, playerID)
 
 	val, err := repository.Rdb.HGet(repository.Ctx, key, "data").Result()
+	if err == redis.Nil {
+		// 说明字段不存在，直接返回 0，不报错
+		return 0, nil
+	}
 	if err != nil {
 		return 0, err
 	}

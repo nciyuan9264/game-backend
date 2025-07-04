@@ -96,7 +96,6 @@ func InitRoomData(roomID string) error {
 	}
 	return nil
 }
-
 func InitPlayerDataToRedis(roomID, playerID string) error {
 	// 初始化卡牌
 	initNormalCard := []entities.NormalCard{}
