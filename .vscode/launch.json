@@ -2,7 +2,44 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Air Dev",
+      "name": "Room Service Debug",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/services/room-service/main.go",
+      "env": {
+        "REDIS_ADDR": "localhost:6379",
+        "REDIS_PASSWORD": "",
+        "REDIS_DB": "0",
+        "GRPC_PORT": "50051"
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}/services/room-service",
+      "console": "integratedTerminal",
+      "showLog": true,
+      "preLaunchTask": "Start Room Service Air"
+    },
+    {
+      "name": "Acquire Service Debug",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/services/acquire/main.go",
+      "env": {
+        "REDIS_ADDR": "localhost:6379",
+        "REDIS_PASSWORD": "",
+        "REDIS_DB": "0",
+        "GIN_MODE": "debug",
+        "PORT": "8080"
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}/services/acquire",
+      "console": "integratedTerminal",
+      "showLog": true,
+      "preLaunchTask": "Start Acquire Service Air"
+    },
+    {
+      "name": "Air Dev (Original)",
       "type": "go",
       "request": "launch",
       "mode": "auto",

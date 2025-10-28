@@ -1,0 +1,53 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Start Room Service Air",
+            "type": "shell",
+            "command": "air",
+            "options": {
+                "cwd": "${workspaceFolder}/services/room-service"
+            },
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "isBackground": true
+        },
+        {
+            "label": "Start Acquire Service Air",
+            "type": "shell",
+            "command": "air",
+            "options": {
+                "cwd": "${workspaceFolder}/services/acquire"
+            },
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "isBackground": true
+        },
+        {
+            "label": "Start Air",
+            "type": "shell",
+            "command": "air",
+            "options": {
+                "cwd": "${workspaceFolder}/splendor"
+            },
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "isBackground": true
+        }
+    ]
+}

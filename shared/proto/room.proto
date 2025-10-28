@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package room;
+
+option go_package = "./proto";
+
+message RoomPlayer {
+  string player_id = 1;
+  bool online = 2;
+}
+
+message RoomInfo {
+  string room_id = 1;
+  string user_id = 2;
+  int32 max_players = 3;
+  bool status = 4;
+  repeated RoomPlayer players = 5;
+}
+
+message CreateRoomRequest {
+  string game_type = 1;
+  int32 max_players = 2;
+  int32 ai_count = 3;
+  string user_id = 4;
+}
+
+message CreateRoomResponse {
+  string room_id = 1;
+  bool success = 2;
+  string message = 3;
+}
+
+message ListRoomsRequest {
+  string game_type = 1;
+}
+
+message ListRoomsResponse {
+  repeated RoomInfo rooms = 1;
+  bool success = 2;
+  string message = 3;
+}
+
+message DeleteRoomRequest {
+  string room_id = 1;
+}
+
+message DeleteRoomResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// 添加服务定义
+service RoomService {
+  rpc CreateRoom(CreateRoomRequest) returns (CreateRoomResponse);
+  rpc ListRooms(ListRoomsRequest) returns (ListRoomsResponse);
+  rpc DeleteRoom(DeleteRoomRequest) returns (DeleteRoomResponse);
+}
