@@ -1,6 +1,6 @@
-version: '3.8'
 services:
   acquire:
+    container_name: backend-acquire
     build:
       context: ./acquire
     ports:
@@ -10,11 +10,14 @@ services:
       - REDIS_DB=0
     volumes:
       - /var/log/acquire:/app/game_logs
+    networks:
+      - global-network
     depends_on:
       - redis
     restart: always
 
   splendor:
+    container_name: backend-splendor
     build:
       context: ./splendor
     ports:
@@ -24,14 +27,19 @@ services:
       - REDIS_DB=1
     volumes:
       - /var/log/splendor:/app/game_logs
+    networks:
+      - global-network
     depends_on:
       - redis
     restart: always
 
   redis:
+    container_name: backend-redis
     image: redis:7
     ports:
       - '6379:6379'
+    networks:
+      - global-network
     restart: always
 
   nginx:
@@ -43,11 +51,12 @@ services:
     volumes:
       - ./nginx/:/etc/nginx/conf.d/:ro
       - /etc/nginx/ssl:/etc/nginx/ssl:ro
+    networks:
+      - global-network
     depends_on:
       - acquire
       - splendor
 
-
 networks:
-  game-network:
-    driver: bridge
+  global-network:
+    external: true
