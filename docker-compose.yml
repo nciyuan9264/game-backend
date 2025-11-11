@@ -10,8 +10,6 @@ services:
       - /var/log/acquire:/app/game_logs
     networks:
       - global-network
-    depends_on:
-      - redis
     restart: always
 
   splendor:
@@ -25,31 +23,7 @@ services:
       - /var/log/splendor:/app/game_logs
     networks:
       - global-network
-    depends_on:
-      - redis
     restart: always
-
-  redis:
-    container_name: backend-redis
-    image: redis:7
-    networks:
-      - global-network
-    restart: always
-
-  nginx:
-    container_name: backend-nginx
-    image: nginx:latest
-    ports:
-      - '80:80'
-      - '443:443'
-    volumes:
-      - ./nginx/:/etc/nginx/conf.d/:ro
-      - /etc/nginx/ssl:/etc/nginx/ssl:ro
-    networks:
-      - global-network
-    depends_on:
-      - acquire
-      - splendor
 
 networks:
   global-network:
