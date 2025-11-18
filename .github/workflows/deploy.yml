@@ -4,24 +4,80 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
-  deploy:
-    runs-on: ubuntu-latest  # 使用最新的 Ubuntu 环境运行
+  build_and_push:
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2  # 检出代码
+        uses: actions/checkout@v4
 
-      - name: Set up SSH key for Huaweiyun
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.HUAWEIYUN_SSH_KEY }}" > ~/.ssh/wzy.pem
-          chmod 600 ~/.ssh/wzy.pem
-          ssh-keyscan -H 120.46.74.14 >> ~/.ssh/known_hosts  # 添加阿里云服务器的公钥
-        env:
-          HUAWEIYUN_SSH_KEY: ${{ secrets.HUAWEIYUN_SSH_KEY }}  # 使用 GitHub Secrets
+      # 登录华为云 SWR
+      - name: Login to Huawei Cloud SWR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.SWR_ENDPOINT }}
+          username: ${{ secrets.SWR_USERNAME }}
+          password: ${{ secrets.SWR_PASSWORD }}
 
-      - name: Deploy to Huaweiyun
+      # 自动生成 tag
+      - name: Set image tag
+        id: vars
+        run: echo "IMAGE_TAG=$(echo ${GITHUB_SHA} | head -c7)" >> $GITHUB_OUTPUT
+
+      # 构建 acquire 镜像
+      - name: Build acquire docker image
         run: |
-          ssh -i ~/.ssh/wzy.pem root@120.46.74.14 "cd /home/game-backend && git pull && docker compose down && docker compose -f docker-compose.yml up -d --build"
+          docker build -t ${{ secrets.SWR_ENDPOINT }}/gamebus/acquire:latest \
+                       -t ${{ secrets.SWR_ENDPOINT }}/gamebus/acquire:${{ steps.vars.outputs.IMAGE_TAG }} \
+                       ./acquire
+
+      # 构建 splendor 镜像
+      - name: Build splendor docker image
+        run: |
+          docker build -t ${{ secrets.SWR_ENDPOINT }}/gamebus/splendor:latest \
+                       -t ${{ secrets.SWR_ENDPOINT }}/gamebus/splendor:${{ steps.vars.outputs.IMAGE_TAG }} \
+                       ./splendor
+
+      # 推送 acquire 镜像
+      - name: Push acquire images
+        run: |
+          docker push ${{ secrets.SWR_ENDPOINT }}/gamebus/acquire:latest
+          docker push ${{ secrets.SWR_ENDPOINT }}/gamebus/acquire:${{ steps.vars.outputs.IMAGE_TAG }}
+
+      # 推送 splendor 镜像
+      - name: Push splendor images
+        run: |
+          docker push ${{ secrets.SWR_ENDPOINT }}/gamebus/splendor:latest
+          docker push ${{ secrets.SWR_ENDPOINT }}/gamebus/splendor:${{ steps.vars.outputs.IMAGE_TAG }}
+
+  # deploy:
+    runs-on: ubuntu-latest
+    needs: build_and_push
+
+    steps:
+      # SSH 到服务器执行部署
+      - name: Execute remote ssh commands
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /home/game-backend
+            echo "Pulling latest images..."
+            docker compose pull
+            echo "Recreating services..."
+            docker compose up -d
+            echo "Cleanup old images..."
+            docker image prune -f
+
+      - name: Send notification to Feishu
+        if: success()  # 只有前面步骤成功时才执行
+        run: |
+          curl -X POST \
+            https://www.feishu.cn/flow/api/trigger-webhook/c8eece8d9476172370b075ed03aa6956 \
+            -H "Content-Type: application/json" \
+            -d '{"msg_type":"text","content":"部署成功！项目: game-backend"}'

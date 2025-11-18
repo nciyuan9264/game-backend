@@ -1,3 +1,4 @@
 */game_logs/*
 __debug_*
 kafka-data/
+.env
