@@ -54,30 +54,30 @@ jobs:
           docker push ${{ secrets.SWR_ENDPOINT }}/gamebus/splendor:${{ steps.vars.outputs.IMAGE_TAG }}
 
   # deploy:
-    runs-on: ubuntu-latest
-    needs: build_and_push
+  #   runs-on: ubuntu-latest
+  #   needs: build_and_push
 
-    steps:
-      # SSH 到服务器执行部署
-      - name: Execute remote ssh commands
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            cd /home/game-backend
-            echo "Pulling latest images..."
-            docker compose pull
-            echo "Recreating services..."
-            docker compose up -d
-            echo "Cleanup old images..."
-            docker image prune -f
+  #   steps:
+  #     # SSH 到服务器执行部署
+  #     - name: Execute remote ssh commands
+  #       uses: appleboy/ssh-action@v1.2.0
+  #       with:
+  #         host: ${{ secrets.SSH_HOST }}
+  #         username: ${{ secrets.SSH_USER }}
+  #         key: ${{ secrets.SSH_PRIVATE_KEY }}
+  #         script: |
+  #           cd /home/game-backend
+  #           echo "Pulling latest images..."
+  #           docker compose pull
+  #           echo "Recreating services..."
+  #           docker compose up -d
+  #           echo "Cleanup old images..."
+  #           docker image prune -f
 
-      - name: Send notification to Feishu
-        if: success()  # 只有前面步骤成功时才执行
-        run: |
-          curl -X POST \
-            https://www.feishu.cn/flow/api/trigger-webhook/c8eece8d9476172370b075ed03aa6956 \
-            -H "Content-Type: application/json" \
-            -d '{"msg_type":"text","content":"部署成功！项目: game-backend"}'
+  #     - name: Send notification to Feishu
+  #       if: success()  # 只有前面步骤成功时才执行
+  #       run: |
+  #         curl -X POST \
+  #           https://www.feishu.cn/flow/api/trigger-webhook/c8eece8d9476172370b075ed03aa6956 \
+  #           -H "Content-Type: application/json" \
+  #           -d '{"msg_type":"text","content":"部署成功！项目: game-backend"}'
