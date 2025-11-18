@@ -9,7 +9,7 @@ import (
 )
 
 func InitRouter(r *gin.Engine) {
-	authCenterURL := "https://auth.gamebus.online"
+	authCenterURL := "https://auth.gamebus.online/auth"
 
 	api := r.Group("/room")
 	api.Use(middleware.JWTMiddlewareViaAuthCenter(authCenterURL)) // 统一鉴权
