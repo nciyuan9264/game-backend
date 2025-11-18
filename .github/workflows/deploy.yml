@@ -78,6 +78,6 @@ jobs:
         if: ${{ success() }}  # 只有前面步骤成功时才执行
         run: |
           curl -X POST \
-            https://www.feishu.cn/flow/api/trigger-webhook/c8eece8d9476172370b075ed03aa6956 \
+            ${{ secrets.FEISHU_WEBHOOK_URL }} \
             -H "Content-Type: application/json" \
             -d '{"msg_type":"text","content":"部署成功！项目: game-backend"}'
