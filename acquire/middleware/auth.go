@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,26 +24,26 @@ func JWTMiddlewareViaAuthCenter(authCenterURL string) gin.HandlerFunc {
 			token = tokenCookie
 			log.Printf("[AUTH] 从Cookie获取token成功")
 		} else {
-			// 尝试从 Authorization Header 获取
-			ah := c.GetHeader("Authorization")
-			if ah == "" {
-				log.Printf("[AUTH] 错误: Authorization header 为空")
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing token", "details": "authorization header is empty"})
-				return
-			}
-			if !strings.HasPrefix(ah, "Bearer ") {
-				log.Printf("[AUTH] 错误: Authorization header 格式不正确，应为 'Bearer {token}'")
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing token", "details": "invalid authorization header format"})
-				return
-			}
-			token = strings.TrimPrefix(ah, "Bearer ")
-			log.Printf("[AUTH] 从Authorization header获取token成功")
+			log.Printf("[AUTH] 错误: Cookie 中不存在 access_token")
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing token", "details": "access_token cookie is empty"})
+			return
 		}
 
 		// 调用登录中心验证 token
 		log.Printf("[AUTH] 准备调用认证中心验证token: %s/verify-token", authCenterURL)
 		req, _ := http.NewRequest("POST", authCenterURL+"/verify-token", nil)
-		req.Header.Set("Authorization", "Bearer "+token)
+		// 只透传 Cookie，不使用 Authorization 头
+		cookieHeader := c.Request.Header.Get("Cookie")
+		if cookieHeader != "" {
+			req.Header.Set("Cookie", cookieHeader)
+			log.Printf("[AUTH] 透传Cookie到认证中心")
+		} else {
+			// 兜底：如果没有 Cookie 头但拿到了 token，则以 Cookie 形式附加
+			if token != "" {
+				req.AddCookie(&http.Cookie{Name: "access_token", Value: token})
+				log.Printf("[AUTH] 无原始Cookie头，附加 access_token Cookie")
+			}
+		}
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
