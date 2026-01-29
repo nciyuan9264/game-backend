@@ -75,7 +75,7 @@ func JWTMiddlewareViaAuthCenter(authCenterURL string) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "failed to parse auth response"})
 			return
 		}
-
+		log.Printf("[AUTH] 认证中心业务状态码: %d, 消息: %s, 数据: %+v", wrapped.StatusCode, wrapped.Message, wrapped.Data)
 		if wrapped.StatusCode != http.StatusOK {
 			log.Printf("[AUTH] 错误: 认证中心业务状态码非200: %d, 消息: %s", wrapped.StatusCode, wrapped.Message)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": wrapped.Message})
