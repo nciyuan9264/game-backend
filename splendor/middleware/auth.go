@@ -9,7 +9,7 @@ import (
 )
 
 type AuthCenterResponse struct {
-	UserID uint   `json:"user_id"`
+	UserID uint   `json:"id"`
 	Email  string `json:"email"`
 	Avatar string `json:"avatar"`
 	Name   string `json:"name"`
