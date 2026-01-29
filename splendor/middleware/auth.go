@@ -62,7 +62,6 @@ func JWTMiddlewareViaAuthCenter(authCenterURL string) gin.HandlerFunc {
 		}
 		defer resp.Body.Close()
 
-		log.Printf("[AUTH] 认证中心返回状态码: %d", resp.StatusCode)
 		if resp.StatusCode != 200 {
 			log.Printf("[AUTH] 错误: 认证中心返回非200状态码")
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "auth server rejected token"})
