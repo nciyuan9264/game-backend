@@ -10,7 +10,16 @@ import (
 
 type AuthCenterResponse struct {
 	UserID uint   `json:"user_id"`
-	Error  string `json:"error"`
+	Email  string `json:"email"`
+	Avatar string `json:"avatar"`
+	Name   string `json:"name"`
+}
+
+// 封装后的认证中心返回结构
+type AuthCenterWrappedResponse struct {
+	StatusCode int                `json:"status_code"`
+	Message    string             `json:"message"`
+	Data       AuthCenterResponse `json:"data"`
 }
 
 func JWTMiddlewareViaAuthCenter(authCenterURL string) gin.HandlerFunc {
@@ -60,22 +69,31 @@ func JWTMiddlewareViaAuthCenter(authCenterURL string) gin.HandlerFunc {
 			return
 		}
 
-		var authResp AuthCenterResponse
-		if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
+		var wrapped AuthCenterWrappedResponse
+		if err := json.NewDecoder(resp.Body).Decode(&wrapped); err != nil {
 			log.Printf("[AUTH] 错误: 解析认证响应失败: %v", err)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "failed to parse auth response"})
 			return
 		}
 
-		if authResp.UserID == 0 {
+		if wrapped.StatusCode != http.StatusOK {
+			log.Printf("[AUTH] 错误: 认证中心业务状态码非200: %d, 消息: %s", wrapped.StatusCode, wrapped.Message)
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": wrapped.Message})
+			return
+		}
+
+		if wrapped.Data.UserID == 0 {
 			log.Printf("[AUTH] 错误: 认证响应中UserID为0，token无效")
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "invalid user id"})
 			return
 		}
 
 		// 保存用户信息到上下文
-		log.Printf("[AUTH] 认证成功: UserID = %d", authResp.UserID)
-		c.Set("user_id", authResp.UserID)
+		log.Printf("[AUTH] 认证成功: UserID = %d, Email = %s, Name = %s", wrapped.Data.UserID, wrapped.Data.Email, wrapped.Data.Name)
+		c.Set("user_id", wrapped.Data.UserID)
+		c.Set("email", wrapped.Data.Email)
+		c.Set("avatar", wrapped.Data.Avatar)
+		c.Set("name", wrapped.Data.Name)
 		c.Next()
 	}
 }
