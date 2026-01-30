@@ -2,6 +2,7 @@ package ws
 
 import (
 	"fmt"
+	"go-game/repository"
 	"time"
 )
 
@@ -31,13 +32,13 @@ func durationUntilNext4AM() time.Duration {
 
 func clearRooms() {
 	// 清空 map 的方式
-	// for k := range Rooms {
-	// 	delete(Rooms, k)
-	// }
-	// err := repository.Rdb.FlushDB(repository.Ctx).Err() // 清空当前数据库
-	// if err != nil {
-	// 	fmt.Println("清空 Redis 失败:", err)
-	// } else {
-	// 	fmt.Println("✅ Redis 已清空")
-	// }
+	for k := range Rooms {
+		delete(Rooms, k)
+	}
+	err := repository.Rdb.FlushDB(repository.Ctx).Err() // 清空当前数据库
+	if err != nil {
+		fmt.Println("清空 Redis 失败:", err)
+	} else {
+		fmt.Println("✅ Redis 已清空")
+	}
 }
