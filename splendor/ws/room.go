@@ -25,10 +25,15 @@ func validateAndJoinRoom(roomID, playerID string, conn *websocket.Conn) bool {
 	// 查找玩家是否已经在房间中（包括掉线状态）
 	for i, pc := range Rooms[roomID] {
 		if pc.PlayerID == playerID {
-			Rooms[roomID][i].Conn = conn
-			Rooms[roomID][i].Online = true
-			log.Printf("玩家 %s 重连成功\n", playerID)
-			return true
+			if !pc.Online {
+				Rooms[roomID][i].Conn = conn
+				Rooms[roomID][i].Online = true
+				log.Printf("玩家 %s 重连成功\n", playerID)
+				return true
+			} else {
+				log.Printf("玩家 %s 已在房间中\n", playerID)
+				return false
+			}
 		}
 	}
 

@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-func ScheduleDailyRoomReset() {
+func ScheduleWeeklyRoomReset() {
 	for {
-		duration := durationUntilNext4AM()
+		duration := durationUntilNextMonday4AM()
 		fmt.Printf("距离下次清空还有：%v\n", duration)
 
 		time.Sleep(duration)
@@ -19,13 +19,20 @@ func ScheduleDailyRoomReset() {
 	}
 }
 
-func durationUntilNext4AM() time.Duration {
+func durationUntilNextMonday4AM() time.Duration {
 	now := time.Now()
-	next := time.Date(now.Year(), now.Month(), now.Day(), 4, 0, 0, 0, now.Location())
+	// 计算距离下周一的天数差
+	daysUntilMonday := int(time.Monday - now.Weekday())
+	if daysUntilMonday <= 0 {
+		daysUntilMonday += 7
+	}
 
-	// 如果当前时间已过4点，则设置为第二天的4点
+	// 设置为下周一的4点
+	next := time.Date(now.Year(), now.Month(), now.Day()+daysUntilMonday, 4, 0, 0, 0, now.Location())
+
+	// 检查是否已经过了本周一的4点，如果是则设置为下周的4点
 	if now.After(next) {
-		next = next.Add(24 * time.Hour)
+		next = next.Add(7 * 24 * time.Hour)
 	}
 	return next.Sub(now)
 }
