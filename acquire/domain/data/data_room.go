@@ -1,4 +1,4 @@
-package ws
+package data
 
 import (
 	"context"
@@ -6,10 +6,12 @@ import (
 	"go-game/dto"
 	"go-game/entities"
 	"go-game/repository"
+	"go-game/utils"
 	"log"
 	"strconv"
 
 	"github.com/go-redis/redis/v8"
+	"golang.org/x/exp/rand"
 )
 
 // 判断玩家信息是否存在
@@ -117,4 +119,53 @@ func GetCurrentPlayer(rdb *redis.Client, ctx context.Context, roomID string) (st
 		return "", fmt.Errorf("获取当前玩家失败: %w", err)
 	}
 	return playerID, nil
+}
+
+// 初始化玩家数据
+func InitPlayerData(room *dto.Room, playerID string) error {
+	// 1. 检查玩家数据是否已存在
+	exists, err := IsPlayerInfoExists(repository.Rdb, repository.Ctx, room.ID, playerID)
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+	if exists {
+		return fmt.Errorf("玩家数据已存在")
+	}
+	// 2. 设置初始资金
+	err = SetPlayerInfoField(repository.Rdb, repository.Ctx, room.ID, playerID, "money", 6000)
+	if err != nil {
+		log.Println("设置玩家信息失败:", err)
+	}
+
+	// 2. 随机抽取起始 Tiles（比如每人 5 个）
+	allTiles, err := GenerateAvailableTiles(room)
+	if err != nil {
+		return err
+	}
+	rand.Shuffle(len(allTiles), func(i, j int) { allTiles[i], allTiles[j] = allTiles[j], allTiles[i] })
+
+	playerTiles := utils.SafeSlice(allTiles, 5)
+	err = SetPlayerTiles(repository.Rdb, repository.Ctx, room.ID, playerID, playerTiles)
+	if err != nil {
+		log.Println(err)
+	}
+	// 3. 初始化玩家股票（全部为 0）
+	// 3.1 获取公司ID列表
+	companyIDs, err := GetCompanyIDs(room.ID)
+	if err != nil {
+		log.Println("获取公司ID失败:", err)
+		return err
+	}
+	// 3.2 初始化玩家股票为0
+	playerStocks := make(map[string]int)
+	for _, company := range companyIDs {
+		playerStocks[company] = 0
+	}
+	err = SetPlayerStocks(repository.Rdb, repository.Ctx, room.ID, playerID, playerStocks)
+	if err != nil {
+		log.Println("写入玩家股票失败:", err)
+	}
+
+	return nil
 }

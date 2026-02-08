@@ -6,3 +6,19 @@ func SafeSlice(slice []string, max int) []string {
 	}
 	return slice[:max]
 }
+
+func StringInSlice(target string, list []string) bool {
+	for _, item := range list {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
+func RemoveAtIndex(slice []string, index int) []string {
+	if index < 0 || index >= len(slice) {
+		return slice // 越界则不修改
+	}
+	return append(slice[:index], slice[index+1:]...)
+}

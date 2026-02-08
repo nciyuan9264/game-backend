@@ -1,140 +1,117 @@
 package ws
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
+	"go-game/domain/data"
+	"go-game/domain/game"
+	"go-game/domain/room"
 	"go-game/dto"
 	"go-game/repository"
 	"log"
-	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/websocket"
 )
 
-// 房间内的所有连接（简化版）
-var Rooms = make(map[string][]dto.PlayerConn)
-var roomLock sync.Mutex
-
-func SwitchToNextPlayer(rdb *redis.Client, ctx context.Context, roomID, currentID string) error {
-	roomLock.Lock()
-	defer roomLock.Unlock()
-
-	players, ok := Rooms[roomID]
-	if !ok || len(players) == 0 {
-		return fmt.Errorf("房间 %s 没有玩家", roomID)
+func transferOwnerOrDelete(r *dto.Room) bool {
+	for _, p := range r.Players {
+		if !p.AI && p.Online {
+			r.OwnerID = p.PlayerID
+			return false
+		}
 	}
 
-	// 找到当前玩家索引
-	var currentIndex int = -1
-	for i, pc := range players {
-		if pc.PlayerID == currentID {
-			currentIndex = i
+	// 没有在线真人了
+	delete(room.Rooms, r.ID)
+	return true
+}
+
+func MarkPlayerOffline(roomID, playerID string, conn interface{}) (roomDeleted bool) {
+	room.RoomLock.Lock()
+	defer room.RoomLock.Unlock()
+
+	r, ok := room.Rooms[roomID]
+	if !ok {
+		return true // 房间都没了，当作已删除
+	}
+
+	var ownerLeft bool
+
+	for _, p := range r.Players {
+		if p.PlayerID == playerID && p.Conn == conn {
+			p.Online = false
+			p.Conn = nil
+			// if p.PlayerID == r.OwnerID {
+			// 	ownerLeft = true
+			// }
 			break
 		}
 	}
 
-	if currentIndex == -1 {
-		return fmt.Errorf("未找到当前玩家 %s", currentID)
+	if ownerLeft {
+		return transferOwnerOrDelete(r)
 	}
 
-	// 下一个玩家索引（循环）
-	nextIndex := (currentIndex + 1) % len(players)
-	nextPlayerID := players[nextIndex].PlayerID
-
-	// 设置当前玩家
-	if err := SetCurrentPlayer(rdb, ctx, roomID, nextPlayerID); err != nil {
-		return fmt.Errorf("切换当前玩家失败: %w", err)
+	return false
+}
+func handleOwnerLeave(r *dto.Room) {
+	// 找第一个非 AI 玩家
+	for _, p := range r.Players {
+		if !p.AI {
+			r.OwnerID = p.PlayerID
+			return
+		}
 	}
 
-	log.Printf("✅ 已将当前玩家切换为: %s\n", nextPlayerID)
-	return nil
+	// 没有真人了 → 删除房间
+	delete(room.Rooms, r.ID)
 }
 
 // 玩家断开连接后，从房间中移除该连接
 func cleanupOnDisconnect(roomID, playerID string, conn *websocket.Conn) {
-	roomLock.Lock()
-	defer roomLock.Unlock()
+	// 1️⃣ 通知 room：这个人掉线了
+	roomDeleted := MarkPlayerOffline(roomID, playerID, conn)
+	currentRoom := room.Rooms[roomID]
 
-	// 遍历查找玩家，并标记为离线
-	for i, pc := range Rooms[roomID] {
-		if pc.PlayerID == playerID {
-			if pc.Conn == conn {
-				Rooms[roomID][i].Online = false
-				Rooms[roomID][i].Conn = nil // 连接置空，方便回收
-				log.Printf("玩家 %s 标记为离线\n", playerID)
-			}
-			break
+	// 2️⃣ 同步 Redis 房间状态（如果房间还在）
+	if !roomDeleted && currentRoom.Status != dto.RoomStatusMatch {
+		roomInfo, err := data.GetRoomInfo(repository.Rdb, roomID)
+		if err != nil {
+			log.Println("❌ 获取房间信息失败:", err)
+		} else if roomInfo.RoomStatus {
+			data.SetRoomStatus(repository.Rdb, roomID, false)
 		}
 	}
+	// 3️⃣ 广播最新状态
+	game.BroadcastToRoom(roomID)
+}
 
-	roomInfo, err := GetRoomInfo(repository.Rdb, roomID)
-	if err != nil {
-		log.Println("❌ 获取房间信息失败:", err)
-		return
+func listenAndBroadcastMessages(conn room.ReadWriteConn, roomID, playerID string) {
+	ctx := &WSConn{
+		Conn:     conn,
+		RoomID:   roomID,
+		PlayerID: playerID,
 	}
-	if roomInfo.RoomStatus {
-		SetRoomStatus(repository.Rdb, roomID, false)
-	}
-	BroadcastToRoom(roomID)
-}
 
-// 消息处理函数类型
-type messageHandler func(conn ReadWriteConn, rdb *redis.Client, roomID, playerID string, msgMap map[string]interface{})
-
-// 消息处理函数映射
-var messageHandlers = map[string]messageHandler{
-	"ready":             handleReadyMessage,
-	"place_tile":        handlePlaceTileMessage,
-	"create_company":    handleCreateCompanyMessage,
-	"merging_settle":    handleMergingSettleMessage,
-	"buy_stock":         handleBuyStockMessage,
-	"merging_selection": handleMergingSelectionMessage,
-	"game_end":          handleGameEndMessage,
-	"play_audio":        handlePlayAudioMessage,
-	"restart_game":      handleRestartGameMessage,
-}
-
-// 持续监听客户端消息，并将其广播给房间内其他玩家
-type WriteOnlyConn interface {
-	WriteMessage(messageType int, data []byte) error
-	Close() error
-}
-
-// 读写接口，供真实客户端连接用，支持读取消息
-type ReadWriteConn interface {
-	WriteOnlyConn
-	ReadMessage() (messageType int, p []byte, err error)
-}
-
-// 修改listenAndBroadcastMessages签名，接收读写接口
-func listenAndBroadcastMessages(conn ReadWriteConn, roomID, playerID string) {
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			log.Println("读取消息失败:", err)
 			break
 		}
+
 		msgMap := make(map[string]interface{})
 		msgMap["playerID"] = playerID
+
 		if err := json.Unmarshal(msg, &msgMap); err != nil {
 			log.Println("消息解析失败:", err)
 			continue
 		}
-		if msgType, ok := msgMap["type"].(string); ok {
-			if handler, found := messageHandlers[msgType]; found {
-				handler(conn, repository.Rdb, roomID, playerID, msgMap)
-				BroadcastToRoom(roomID)
-			} else {
-				log.Printf("⚠️ 未知的消息类型: %s", msgType)
-			}
-		}
+
+		Dispatch(ctx, msgMap)
 	}
 }
 
-// WebSocket 主入口（处理每个连接）
 func HandleWebSocket(c *gin.Context) {
 	conn, err := upgradeConnection(c)
 	if err != nil {
@@ -142,27 +119,34 @@ func HandleWebSocket(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	// 获取房间 ID
+	// 1️⃣ 解析参数
 	roomID := c.Query("roomID")
-	if roomID == "" {
-		log.Println("缺少 roomID")
-		return
-	}
-	// 获取玩家 ID（从前端传来的 userId）
 	playerID := c.Query("userID")
-	if playerID == "" {
-		log.Println("缺少 userID")
+	if roomID == "" || playerID == "" {
+		log.Println("缺少 roomID 或 userID")
 		return
 	}
 
-	// 尝试加入房间
-	ok := validateAndJoinRoom(roomID, playerID, conn)
-	if !ok {
-		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"房间已满"}`))
+	// 2️⃣ 校验 + 加入房间（唯一一次写 Rooms 的地方）
+	ok := room.ValidateAndJoinRoom(roomID, playerID, conn)
+	if ok != nil {
+		conn.WriteMessage(
+			websocket.TextMessage,
+			[]byte(`{"type":"error","message":"`+ok.Error()+`"}`),
+		)
 		return
 	}
-	BroadcastToRoom(roomID)
-	// 离开时清理资源
+
+	if room.Rooms[roomID].Status == dto.RoomStatusMatch {
+		game.BroadcastToMatch(roomID)
+	} else {
+		// 3️⃣ 初始广播（有人上线）
+		game.BroadcastToRoom(roomID)
+	}
+
+	// 4️⃣ 离开时清理
 	defer cleanupOnDisconnect(roomID, playerID, conn)
+
+	// 5️⃣ 进入消息循环（真正的 WS 世界）
 	listenAndBroadcastMessages(conn, roomID, playerID)
 }

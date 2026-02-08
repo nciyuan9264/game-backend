@@ -3,7 +3,7 @@ package main
 import (
 	"go-game/repository"
 	"go-game/router"
-	"go-game/ws"
+	"go-game/service"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -14,7 +14,7 @@ func main() {
 	repository.InitRedis()
 
 	r := gin.Default()
-	go ws.ScheduleWeeklyRoomReset()
+	go service.ScheduleWeeklyRoomReset()
 	// 设置 CORS 中间件，允许所有域名、所有方法、所有 header
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"https://board.gamebus.online", "https://gamebus.online", "http://localhost:5173"}, // 允许你的前端域名跨域访问

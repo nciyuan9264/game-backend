@@ -1,4 +1,4 @@
-package ws
+package data
 
 import (
 	"context"
@@ -6,9 +6,83 @@ import (
 	"fmt"
 	"go-game/dto"
 	"go-game/repository"
+	"log"
+	"strconv"
 
 	"github.com/go-redis/redis/v8"
 )
+
+// GetConnectedTiles 用于从 tileKey 开始，递归查找相邻、归属一致的 tile
+func GetConnectedTiles(rdb *redis.Client, roomID, startTileKey string) []string {
+	visited := make(map[string]bool)
+	queue := []string{startTileKey}
+	var connected []string
+
+	startTile, err := GetTileFromRedis(rdb, repository.Ctx, roomID, startTileKey)
+	if err != nil {
+		log.Println("无法获取起始 tile :", err)
+		return connected
+	}
+	startTileOwner := startTile.Belong
+
+	for len(queue) > 0 {
+		tile := queue[0]
+		queue = queue[1:]
+
+		if visited[tile] {
+			continue
+		}
+		visited[tile] = true
+		connected = append(connected, tile)
+
+		neighbors := GetAdjacentTileKeys(tile)
+		for _, neighbor := range neighbors {
+			if visited[neighbor] {
+				continue
+			}
+			tile, err := GetTileFromRedis(rdb, repository.Ctx, roomID, neighbor)
+			belong := tile.Belong
+			if err == nil && belong == startTileOwner {
+				queue = append(queue, neighbor)
+			}
+		}
+	}
+
+	return connected
+}
+
+// getAdjacentTileKeys 用于获取指定 tileKey 的上下左右邻接的 tileKey 列表
+func GetAdjacentTileKeys(tileKey string) []string {
+	row := tileKey[:len(tileKey)-1] // 例如 "6"
+	col := tileKey[len(tileKey)-1:] // 例如 "A"
+
+	// 上下左右邻接逻辑
+	rowNum, err := strconv.Atoi(row)
+	if err != nil {
+		return nil
+	}
+
+	var adjacent []string
+
+	// 上 (row-1)
+	if rowNum > 1 {
+		adjacent = append(adjacent, fmt.Sprintf("%d%s", rowNum-1, col))
+	}
+	// 下 (row+1)
+	if rowNum < 12 {
+		adjacent = append(adjacent, fmt.Sprintf("%d%s", rowNum+1, col))
+	}
+	// 左 (col-1)
+	if col[0] > 'A' {
+		adjacent = append(adjacent, fmt.Sprintf("%d%s", rowNum, string(col[0]-1)))
+	}
+	// 右 (col+1)
+	if col[0] < 'I' {
+		adjacent = append(adjacent, fmt.Sprintf("%d%s", rowNum, string(col[0]+1)))
+	}
+
+	return adjacent
+}
 
 // GetTileFromRedis 获取指定房间的某个 tile 信息
 func GetTileFromRedis(rdb *redis.Client, ctx context.Context, roomID, tileKey string) (dto.Tile, error) {

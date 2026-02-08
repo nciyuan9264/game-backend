@@ -1,8 +1,10 @@
-package ws
+package game
 
 import (
 	"context"
 	"fmt"
+	"go-game/domain/data"
+	"go-game/dto"
 	"go-game/utils"
 	"log"
 	"math/rand/v2"
@@ -10,8 +12,8 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-func GiveRandomTileToPlayer(rdb *redis.Client, ctx context.Context, roomID, playerID string) error {
-	allTiles, err := generateAvailableTiles(roomID)
+func GiveRandomTileToPlayer(rdb *redis.Client, ctx context.Context, room *dto.Room, playerID string) error {
+	allTiles, err := data.GenerateAvailableTiles(room)
 	if err != nil {
 		return fmt.Errorf("生成可用 tiles 失败: %w", err)
 	}
@@ -32,7 +34,7 @@ func GiveRandomTileToPlayer(rdb *redis.Client, ctx context.Context, roomID, play
 	}
 
 	// 添加到玩家 tiles 中
-	if err := AddPlayerTile(rdb, ctx, roomID, playerID, selected[0]); err != nil {
+	if err := data.AddPlayerTile(rdb, ctx, room.ID, playerID, selected[0]); err != nil {
 		return fmt.Errorf("添加 tile 失败: %w", err)
 	}
 

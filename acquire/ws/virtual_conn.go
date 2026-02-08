@@ -1,4 +1,3 @@
-// virtual_conn.go
 package ws
 
 import (

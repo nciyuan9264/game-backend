@@ -1,8 +1,10 @@
-package ws
+package game
 
 import (
 	"context"
 	"fmt"
+	"go-game/domain/data"
+	"go-game/domain/room"
 	"go-game/dto"
 	"go-game/repository"
 	"log"
@@ -54,7 +56,7 @@ func UpdateCompanyStockAndTiles(rdb *redis.Client, roomID string, company string
 // UpdatePlayerStockAndMoney 更新玩家数据
 func UpdatePlayerStockAndMoney(rdb *redis.Client, ctx context.Context, roomID string, playerID string, company string, stockCount int, totalPrice int) error {
 	// 获取当前金额
-	playerInfo, err := GetPlayerInfoField(rdb, ctx, roomID, playerID, "money")
+	playerInfo, err := data.GetPlayerInfoField(rdb, ctx, roomID, playerID, "money")
 	if err != nil {
 		return fmt.Errorf("获取玩家金额失败: %w", err)
 	}
@@ -65,12 +67,12 @@ func UpdatePlayerStockAndMoney(rdb *redis.Client, ctx context.Context, roomID st
 	}
 	newMoney := money - totalPrice
 
-	if err := SetPlayerInfoField(rdb, ctx, roomID, playerID, "money", newMoney); err != nil {
+	if err := data.SetPlayerInfoField(rdb, ctx, roomID, playerID, "money", newMoney); err != nil {
 		return fmt.Errorf("更新余额失败: %w", err)
 	}
 
 	// 获取玩家现有股票
-	stockMap, err := GetPlayerStocks(rdb, ctx, roomID, playerID)
+	stockMap, err := data.GetPlayerStocks(rdb, ctx, roomID, playerID)
 	if err != nil {
 		log.Printf("❌ 获取玩家[%s]股票失败: %v\n", playerID, err)
 		return err
@@ -85,7 +87,7 @@ func UpdatePlayerStockAndMoney(rdb *redis.Client, ctx context.Context, roomID st
 		stockMapInterface[k] = v
 	}
 	// 写回玩家股票信息
-	err = SetPlayerStocks(rdb, ctx, roomID, playerID, stockMapInterface)
+	err = data.SetPlayerStocks(rdb, ctx, roomID, playerID, stockMapInterface)
 	if err != nil {
 		log.Println("❌ 写入玩家股票失败:", err)
 		return fmt.Errorf("写入玩家股票失败: %w", err)
@@ -99,8 +101,8 @@ type BuyStockRequest struct {
 	Stocks map[string]float64 `json:"stocks"`
 }
 
-func handleBuyStockMessage(conn ReadWriteConn, rdb *redis.Client, roomID string, playerID string, msgMap map[string]interface{}) {
-	currentPlayer, err := GetCurrentPlayer(rdb, repository.Ctx, roomID)
+func HandleBuyStockMessage(conn room.ReadWriteConn, rdb *redis.Client, room *dto.Room, playerID string, msgMap map[string]interface{}) {
+	currentPlayer, err := data.GetCurrentPlayer(rdb, repository.Ctx, room.ID)
 	if err != nil {
 		log.Println("❌ 获取当前玩家失败:", err)
 		return
@@ -110,7 +112,7 @@ func handleBuyStockMessage(conn ReadWriteConn, rdb *redis.Client, roomID string,
 		return
 	}
 
-	roomInfo, err := GetRoomInfo(rdb, roomID)
+	roomInfo, err := data.GetRoomInfo(rdb, room.ID)
 	if err != nil {
 		log.Println("❌ 获取房间信息失败:", err)
 		return
@@ -143,7 +145,7 @@ func handleBuyStockMessage(conn ReadWriteConn, rdb *redis.Client, roomID string,
 		count := countVal
 
 		// 获取股价
-		companyKey := fmt.Sprintf("room:%s:company:%s", roomID, company)
+		companyKey := fmt.Sprintf("room:%s:company:%s", room.ID, company)
 		priceStr, err := rdb.HGet(repository.Ctx, companyKey, "stockPrice").Result()
 		if err != nil {
 			log.Println("❌ 获取股价失败:", company, err)
@@ -158,7 +160,7 @@ func handleBuyStockMessage(conn ReadWriteConn, rdb *redis.Client, roomID string,
 	for company, countVal := range stocks {
 		count := countVal
 		for i := 0; i < count; i++ {
-			if err := UpdateCompanyStockAndTiles(rdb, roomID, company); err != nil {
+			if err := UpdateCompanyStockAndTiles(rdb, room.ID, company); err != nil {
 				log.Println("❌ 更新公司失败:", err)
 				return
 			}
@@ -168,22 +170,22 @@ func handleBuyStockMessage(conn ReadWriteConn, rdb *redis.Client, roomID string,
 	// 再统一扣钱 & 更新玩家股票
 	for company, countVal := range stocks {
 		count := countVal
-		if err := UpdatePlayerStockAndMoney(rdb, repository.Ctx, roomID, playerID, company, count, priceMap[company]*count); err != nil {
+		if err := UpdatePlayerStockAndMoney(rdb, repository.Ctx, room.ID, playerID, company, count, priceMap[company]*count); err != nil {
 			log.Println("❌ 更新玩家失败:", err)
 			return
 		}
 	}
 
-	err = GiveRandomTileToPlayer(repository.Rdb, repository.Ctx, roomID, playerID)
+	err = GiveRandomTileToPlayer(rdb, repository.Ctx, room, playerID)
 	if err != nil {
 		log.Println("发牌失败:", err)
 	}
 	// 切换玩家
-	if err := SwitchToNextPlayer(rdb, repository.Ctx, roomID, playerID); err != nil {
+	if err := SwitchToNextPlayer(rdb, repository.Ctx, room.ID, playerID); err != nil {
 		log.Println("切换玩家失败:", err)
 	}
 	// 最后设置房间状态为 setTile
-	err = SetGameStatus(rdb, roomID, dto.RoomStatusSetTile)
+	err = data.SetGameStatus(rdb, room.ID, dto.RoomStatusSetTile)
 	if err != nil {
 		log.Println("❌ 设置房间状态失败:", err)
 	}

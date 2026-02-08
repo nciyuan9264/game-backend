@@ -1,7 +1,8 @@
-package ws
+package service
 
 import (
 	"fmt"
+	"go-game/domain/room"
 	"go-game/repository"
 	"time"
 )
@@ -39,8 +40,8 @@ func durationUntilNextMonday4AM() time.Duration {
 
 func clearRooms() {
 	// 清空 map 的方式
-	for k := range Rooms {
-		delete(Rooms, k)
+	for k := range room.Rooms {
+		delete(room.Rooms, k)
 	}
 	err := repository.Rdb.FlushDB(repository.Ctx).Err() // 清空当前数据库
 	if err != nil {

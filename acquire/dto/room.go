@@ -3,13 +3,15 @@ package dto
 type RoomPlayer struct {
 	PlayerID string `json:"playerID"`
 	Online   bool   `json:"online"`
+	AI       bool   `json:"ai"`
+	Ready    bool   `json:"ready"`
 }
 type RoomInfo struct {
-	RoomID     string       `json:"roomID"`
-	UserID     string       `json:"userID"`
-	MaxPlayers int          `json:"maxPlayers"`
-	Status     bool         `json:"status"`
-	RoomPlayer []RoomPlayer `json:"roomPlayer"`
+	RoomID         string       `json:"roomID"`
+	Status         RoomStatus   `json:"status"`
+	OwnerID        string       `json:"ownerID"`
+	RoomPlayer     []RoomPlayer `json:"roomPlayer"`
+	EmptyTileCount int          `json:"emptyTileCount"`
 }
 
 type PlayerInfo struct {
@@ -27,7 +29,7 @@ type DeleteRoomRequest struct {
 }
 
 type CreateRoomResponse struct {
-	Room_id string `json:"room_id" binding:"required"`
+	RoomID string `json:"roomID" binding:"required"`
 }
 
 type GetRoomList struct {
@@ -38,4 +40,19 @@ type GetRoomList struct {
 type Tile struct {
 	ID     string `json:"id"`     // "1A"
 	Belong string `json:"belong"` // 公司名
+}
+
+type PlayerConn struct {
+	PlayerID string        `json:"playerID"`
+	Conn     ConnInterface `json:"conn"`
+	Online   bool          `json:"online"`
+	Ready    bool          `json:"ready"`
+	AI       bool          `json:"ai"`
+}
+
+type Room struct {
+	ID      string        `json:"roomID"`
+	OwnerID string        `json:"ownerID"`
+	Status  RoomStatus    `json:"status"`
+	Players []*PlayerConn `json:"players"`
 }

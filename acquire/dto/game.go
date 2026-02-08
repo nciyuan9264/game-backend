@@ -21,15 +21,11 @@ func (r *RealConn) Close() error {
 }
 
 // 玩家连接对象结构体
-type PlayerConn struct {
-	PlayerID string
-	Conn     ConnInterface
-	Online   bool // 新增：标记是否在线
-}
 
 const (
+	RoomStatusMatch            RoomStatus = "match"            // 初始化房间状态
 	RoomStatusWaiting          RoomStatus = "waiting"          // 等待玩家加入房间
-	RoomStatusSetTile          RoomStatus = "setTile"          //等待玩家放置Tile
+	RoomStatusSetTile          RoomStatus = "setTile"          // 等待玩家放置Tile
 	RoomStatusCreateCompany    RoomStatus = "createCompany"    // 等待玩家创建公司
 	RoomStatusBuyStock         RoomStatus = "buyStock"         // 等待玩家购买股票
 	RoomStatusMerging          RoomStatus = "merging"          // 等待玩家选择并购公司

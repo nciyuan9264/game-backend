@@ -1,8 +1,10 @@
-package ws
+package game
 
 import (
 	"encoding/json"
 	"fmt"
+	"go-game/domain/data"
+	"go-game/domain/room"
 	"go-game/dto"
 	"go-game/entities"
 	"go-game/repository"
@@ -10,11 +12,50 @@ import (
 	"log"
 	"os"
 	"path"
+	"reflect"
+	"strconv"
 	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/websocket"
+	"github.com/mitchellh/mapstructure"
 )
+
+// 自定义 HookFunc，把字符串转换成 int
+func stringToIntHookFunc() mapstructure.DecodeHookFunc {
+	return func(from reflect.Kind, to reflect.Kind, data interface{}) (interface{}, error) {
+		if from == reflect.String && to == reflect.Int {
+			return strconv.Atoi(data.(string))
+		}
+		return data, nil
+	}
+}
+
+func CalculateTotalValue(playerStocks map[string]int, companyInfoMap map[string]entities.CompanyInfo) int {
+	totalValue := 0
+	for company, count := range playerStocks {
+		companyInfo, ok := companyInfoMap[company]
+		if !ok {
+			log.Printf("无法找到公司信息: %s\n", company)
+			continue
+		}
+		totalValue += count * companyInfo.StockPrice
+	}
+	return totalValue
+}
+
+func getGameLogFilePath(roomID string) string {
+	// 建议你在房间初始化时设置一个 startTime 或 gameID
+	// 这里假设你用启动时间生成文件名
+	startKey := fmt.Sprintf("room:%s:game_start_time", roomID)
+	startTimeStr, err := repository.Rdb.Get(repository.Ctx, startKey).Result()
+	if err != nil {
+		startTimeStr = time.Now().Format("20060102_150405") // fallback
+		repository.Rdb.Set(repository.Ctx, startKey, time.Now().Format("20060102_150405"), 0)
+	}
+	fileName := fmt.Sprintf("%s_%s.json", roomID, startTimeStr)
+	return path.Join("./game_logs", fileName)
+}
 
 func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[string]interface{}) {
 	go func() {
@@ -108,45 +149,45 @@ func SyncRoomMessage(conn dto.ConnInterface, roomID string, playerID string, res
 		return fmt.Errorf("❌ 获取公司信息 pipeline 执行失败: %w", err)
 	}
 
-	companyInfo, err := GetCompanyInfo(rdb, roomID)
+	companyInfo, err := data.GetCompanyInfo(rdb, roomID)
 	if err != nil {
 		return fmt.Errorf("❌ 获取公司信息失败: %w", err)
 	}
 
-	roomInfo, err := GetRoomInfo(rdb, roomID)
+	roomInfo, err := data.GetRoomInfo(rdb, roomID)
 	if err != nil {
 		return fmt.Errorf("❌ 获取房间信息失败: %w", err)
 	}
 
 	// ------- 其他 Redis 相关调用 -------
-	tileMap, err := GetAllRoomTiles(rdb, roomID)
+	tileMap, err := data.GetAllRoomTiles(rdb, roomID)
 	if err != nil {
 		return fmt.Errorf("❌ 获取房间 tile 信息失败: %w", err)
 	}
 
-	merge_main_company_temp, err := GetMergeMainCompany(rdb, ctx, roomID)
+	merge_main_company_temp, err := data.GetMergeMainCompany(rdb, ctx, roomID)
 	if err != nil {
 		return fmt.Errorf("❌ 获取合并主公司信息失败: %w", err)
 	}
 
-	merge_selection_temp, err := GetMergingSelection(rdb, ctx, roomID)
+	merge_selection_temp, err := data.GetMergingSelection(rdb, ctx, roomID)
 	if err != nil {
 		return fmt.Errorf("❌ 获取合并选择信息失败: %w", err)
 	}
 
-	mergeSettleData, err := GetMergeSettleData(ctx, rdb, roomID)
+	mergeSettleData, err := data.GetMergeSettleData(ctx, rdb, roomID)
 	if err != nil {
 		return fmt.Errorf("❌ 获取合并结算信息失败: %w", err)
 	}
 
-	stocks, err := GetPlayerStocks(rdb, ctx, roomID, playerID)
+	stocks, err := data.GetPlayerStocks(rdb, ctx, roomID, playerID)
 	if err != nil {
 		return fmt.Errorf("❌ 获取玩家股票信息失败: %w", err)
 	}
 
 	// ------- 组装消息 -------
 	msg := map[string]interface{}{
-		"type":     "sync",
+		"type":     "ROOM_SYNC",
 		"result":   result,
 		"playerId": playerID,
 		"playerData": map[string]interface{}{
@@ -179,15 +220,44 @@ func SyncRoomMessage(conn dto.ConnInterface, roomID string, playerID string, res
 	return conn.WriteMessage(websocket.TextMessage, data)
 }
 
+func SyncMatchMessage(conn dto.ConnInterface, roomID string, playerID string, roomInfo *dto.Room) error {
+
+	msg := struct {
+		Type     string    `json:"type"`
+		RoomID   string    `json:"roomID"`
+		PlayerID string    `json:"playerID"`
+		Room     *dto.Room `json:"room"`
+	}{
+		Type:     "MATCH_SYNC",
+		RoomID:   roomID,
+		PlayerID: playerID,
+		Room:     roomInfo,
+	}
+
+	// ------- JSON 编码 -------
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("❌ 编码 JSON 失败: %w", err)
+	}
+
+	// ------- 只给当前玩家写日志（如果你有这个需求） -------
+	// if playerID == roomInfo.OwnerID {
+	// 	WriteGameLog(roomID, playerID, roomInfo, msg)
+	// }
+
+	// ------- 发送 WS -------
+	return conn.WriteMessage(websocket.TextMessage, data)
+}
+
 // 广播消息给房间内所有连接成功的玩家
 func BroadcastToRoom(roomID string) {
-	companyInfoMap, err := GetCompanyInfo(repository.Rdb, roomID)
+	companyInfoMap, err := data.GetCompanyInfo(repository.Rdb, roomID)
 	if err != nil {
 		log.Println("获取公司信息失败:", err)
 		return
 	}
 
-	tileMap, err := GetAllRoomTiles(repository.Rdb, roomID)
+	tileMap, err := data.GetAllRoomTiles(repository.Rdb, roomID)
 	if err != nil {
 		log.Println("获取所有 tile 失败:", err)
 		return
@@ -200,8 +270,8 @@ func BroadcastToRoom(roomID string) {
 	}
 
 	allStockMap := make(map[string]int)
-	for _, pc := range Rooms[roomID] {
-		stockMap, err := GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, pc.PlayerID)
+	for _, pc := range room.Rooms[roomID].Players {
+		stockMap, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, pc.PlayerID)
 		if err != nil {
 			log.Printf("❌ 获取玩家[%s]股票失败: %v\n", pc.PlayerID, err)
 			return
@@ -220,20 +290,20 @@ func BroadcastToRoom(roomID string) {
 		companyInfoMap[companyName] = info
 	}
 
-	err = SetCompanyInfo(repository.Rdb, roomID, companyInfoMap)
+	err = data.SetCompanyInfo(repository.Rdb, roomID, companyInfoMap)
 	if err != nil {
 		log.Println("❌ 设置公司信息失败:", err)
 		return
 	}
 
 	result := make(map[string]int)
-	for _, pc := range Rooms[roomID] {
-		playerStocks, err := GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, pc.PlayerID)
+	for _, pc := range room.Rooms[roomID].Players {
+		playerStocks, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, pc.PlayerID)
 		if err != nil {
 			log.Printf("❌ 获取玩家[%s]股票失败: %v\n", pc.PlayerID, err)
 			continue
 		}
-		playerInfo, err := GetPlayerInfoField(repository.Rdb, repository.Ctx, roomID, pc.PlayerID, "money")
+		playerInfo, err := data.GetPlayerInfoField(repository.Rdb, repository.Ctx, roomID, pc.PlayerID, "money")
 		if err != nil {
 			log.Printf("❌ 获取玩家[%s]金钱失败: %v\n", pc.PlayerID, err)
 			continue
@@ -241,13 +311,53 @@ func BroadcastToRoom(roomID string) {
 		result[pc.PlayerID] = CalculateTotalValue(playerStocks, companyInfoMap) + playerInfo.Money
 	}
 
-	for _, pc := range Rooms[roomID] {
+	for _, pc := range room.Rooms[roomID].Players {
 		if pc.Online {
 			// 尝试发送消息
 			if err := SyncRoomMessage(pc.Conn, roomID, pc.PlayerID, result); err != nil {
 				log.Println("广播失败，移除连接:", pc.PlayerID)
 				pc.Conn.Close()
 			}
+		}
+	}
+}
+
+func SnapshotRoom(r *dto.Room) *dto.Room {
+	copyRoom := *r
+	copyRoom.Players = make([]*dto.PlayerConn, 0, len(r.Players))
+
+	for _, p := range r.Players {
+		cp := *p
+		copyRoom.Players = append(copyRoom.Players, &cp)
+	}
+
+	return &copyRoom
+}
+
+func BroadcastToMatch(roomID string) {
+	r, ok := room.Rooms[roomID]
+	if !ok {
+		log.Println("房间不存在:", roomID)
+		return
+	}
+
+	// 生成一次快照，所有人共用
+	snapshot := SnapshotRoom(r)
+
+	for _, pc := range r.Players {
+		if !pc.Online {
+			continue
+		}
+
+		if err := SyncMatchMessage(
+			pc.Conn,
+			roomID,
+			pc.PlayerID,
+			snapshot,
+		); err != nil {
+			log.Println("广播失败，关闭连接:", pc.PlayerID, err)
+			pc.Conn.Close()
+			pc.Online = false
 		}
 	}
 }

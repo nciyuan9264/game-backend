@@ -2,8 +2,12 @@ package ws
 
 import (
 	"encoding/json"
+	"go-game/domain/data"
+	"go-game/domain/game"
+	"go-game/domain/room"
 	"go-game/dto"
 	"go-game/repository"
+	"go-game/utils"
 	"log"
 	"sort"
 	"strings"
@@ -12,15 +16,15 @@ import (
 	"golang.org/x/exp/rand"
 )
 
-var _ WriteOnlyConn = (*VirtualConn)(nil) // 编译期断言实现
+var _ room.WriteOnlyConn = (*VirtualConn)(nil) // 编译期断言实现
 
 func chooseTileForAI(roomID, playerID string) string {
-	tiles, err := GetPlayerTiles(repository.Rdb, repository.Ctx, roomID, playerID)
+	tiles, err := data.GetPlayerTiles(repository.Rdb, repository.Ctx, roomID, playerID)
 	if err != nil || len(tiles) == 0 {
 		return ""
 	}
 
-	allTiles, err := GetAllRoomTiles(repository.Rdb, roomID)
+	allTiles, err := data.GetAllRoomTiles(repository.Rdb, roomID)
 	if err != nil {
 		log.Println("❌ 获取所有房间瓦片失败:", err)
 		return ""
@@ -28,7 +32,7 @@ func chooseTileForAI(roomID, playerID string) string {
 
 	// 遍历 AI 玩家拥有的 tiles
 	for _, tileID := range tiles {
-		neighbors := getAdjacentTileKeys(tileID)
+		neighbors := data.GetAdjacentTileKeys(tileID)
 		for _, nID := range neighbors {
 			if neighborTile, ok := allTiles[nID]; ok && neighborTile.Belong != "" {
 				return tileID
@@ -45,7 +49,7 @@ func shouldCreateCompany(roomID, playerID string) bool {
 }
 
 func chooseCompanyForAI(roomID string) string {
-	companyInfo, err := GetCompanyInfo(repository.Rdb, roomID)
+	companyInfo, err := data.GetCompanyInfo(repository.Rdb, roomID)
 	if err != nil {
 		log.Println("❌ 获取公司信息失败:", err)
 		return ""
@@ -64,9 +68,9 @@ func chooseCompanyForAI(roomID string) string {
 	var p1, p2, p3 []string
 
 	for _, c := range uncreated {
-		if StringInSlice(c, priority1) {
+		if utils.StringInSlice(c, priority1) {
 			p1 = append(p1, c)
-		} else if StringInSlice(c, priority2) {
+		} else if utils.StringInSlice(c, priority2) {
 			p2 = append(p2, c)
 		} else {
 			p3 = append(p3, c)
@@ -84,19 +88,19 @@ func chooseCompanyForAI(roomID string) string {
 }
 
 func chooseStocksToBuyForAI(roomID, playerID string) map[string]interface{} {
-	companyInfo, err := GetCompanyInfo(repository.Rdb, roomID)
+	companyInfo, err := data.GetCompanyInfo(repository.Rdb, roomID)
 	if err != nil {
 		log.Println("❌ 获取公司信息失败:", err)
 		return nil
 	}
-	playerInfo, err := GetPlayerInfoField(repository.Rdb, repository.Ctx, roomID, playerID, "money")
+	playerInfo, err := data.GetPlayerInfoField(repository.Rdb, repository.Ctx, roomID, playerID, "money")
 	if err != nil {
 		log.Println("❌ 获取玩家信息失败:", err)
 		return nil
 	}
 	money := playerInfo.Money
 
-	playerStock, err := GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, playerID)
+	playerStock, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, playerID)
 	if err != nil {
 		log.Println("❌ 获取玩家股票失败:", err)
 		return nil
@@ -169,25 +173,25 @@ func IsAIPlayer(playerID string) bool {
 	return strings.HasPrefix(playerID, "ai_") // 简单策略，也可以是数据库字段
 }
 func chooseMergingSettleForAI(roomID, playerID string) []dto.MergingSettleItem {
-	playerData, err := GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, playerID)
+	playerData, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, playerID)
 	if err != nil {
 		log.Println("❌ 获取玩家股票信息失败:", err)
 		return nil
 	}
 
-	mergeSettleData, err := GetMergeSettleData(repository.Ctx, repository.Rdb, roomID)
+	mergeSettleData, err := data.GetMergeSettleData(repository.Ctx, repository.Rdb, roomID)
 	if err != nil {
 		log.Printf("❌ 获取合并数据失败: %v\n", err)
 		return nil
 	}
 
-	mainCompany, err := GetMergeMainCompany(repository.Rdb, repository.Ctx, roomID)
+	mainCompany, err := data.GetMergeMainCompany(repository.Rdb, repository.Ctx, roomID)
 	if err != nil {
 		log.Println("❌ 获取合并主公司失败:", err)
 		return nil
 	}
 
-	companyInfo, err := GetCompanyInfo(repository.Rdb, roomID)
+	companyInfo, err := data.GetCompanyInfo(repository.Rdb, roomID)
 	if err != nil {
 		log.Println("❌ 获取公司信息失败:", err)
 		return nil
@@ -232,13 +236,13 @@ func chooseMergingSettleForAI(roomID, playerID string) []dto.MergingSettleItem {
 }
 
 func chooseMergingSelectionForAI(roomID, playerID string, mainCompany []string) string {
-	companyInfo, err := GetCompanyInfo(repository.Rdb, roomID)
+	companyInfo, err := data.GetCompanyInfo(repository.Rdb, roomID)
 	if err != nil {
 		log.Println("❌ 获取公司信息失败:", err)
 		return ""
 	}
 
-	playerStocks, err := GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, playerID)
+	playerStocks, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, playerID)
 	if err != nil {
 		log.Println("❌ 获取玩家股票信息失败:", err)
 		return ""
@@ -260,9 +264,9 @@ func chooseMergingSelectionForAI(roomID, playerID string, mainCompany []string) 
 	return res
 }
 
-func MaybeRunAIIfNeeded(roomID string, data []byte) bool {
+func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 	var msg map[string]interface{}
-	if err := json.Unmarshal(data, &msg); err != nil {
+	if err := json.Unmarshal(message, &msg); err != nil {
 		log.Println("❌ AI 消息格式错误:", err)
 		return false
 	}
@@ -322,7 +326,7 @@ func MaybeRunAIIfNeeded(roomID string, data []byte) bool {
 
 	// mergingSettle 特殊校验
 	if gameStatus == dto.RoomStatusMergingSettle {
-		mergeSettleData, err := GetMergeSettleData(repository.Ctx, repository.Rdb, roomID)
+		mergeSettleData, err := data.GetMergeSettleData(repository.Ctx, repository.Rdb, roomID)
 		if err != nil {
 			log.Printf("❌ 获取合并数据失败: %v\n", err)
 			return false
@@ -345,7 +349,7 @@ func MaybeRunAIIfNeeded(roomID string, data []byte) bool {
 		}
 	}
 
-	allTile, err := GetAllRoomTiles(repository.Rdb, roomID)
+	allTile, err := data.GetAllRoomTiles(repository.Rdb, roomID)
 	if err != nil {
 		log.Println("❌ 获取所有 tile 失败:", err)
 		return false
@@ -423,10 +427,10 @@ func MaybeRunAIIfNeeded(roomID string, data []byte) bool {
 
 		// 加入 playerID 然后交给 handler 执行
 		aiMsg["playerID"] = playerId
-		if handler, found := messageHandlers[aiMsg["type"].(string)]; found {
+		if handler, found := GameHandlers[aiMsg["type"].(string)]; found {
 			log.Printf("🤖 AI [%s] 执行操作: %s", playerId, aiMsg["type"])
-			handler(conn, rdb, roomID, playerId, aiMsg)
-			BroadcastToRoom(roomID)
+			handler(conn, rdb, room.Rooms[roomID], playerId, aiMsg)
+			game.BroadcastToRoom(roomID)
 		} else {
 			log.Printf("❌ AI 未找到 handler 类型: %s", aiMsg["type"])
 		}

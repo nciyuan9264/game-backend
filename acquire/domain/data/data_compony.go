@@ -1,4 +1,4 @@
-package ws
+package data
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-func getCompanyIDs(roomID string) ([]string, error) {
+func GetCompanyIDs(roomID string) ([]string, error) {
 	ctx := repository.Ctx
 	rdb := repository.Rdb
 
