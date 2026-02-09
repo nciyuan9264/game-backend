@@ -67,7 +67,9 @@ func MarkPlayerOffline(r *domain.Room, playerID string) (roomDeleted bool) {
 			}
 		}
 		delete(r.Players, playerID)
-
+		if playerID == r.OwnerID {
+			ownerLeft = true
+		}
 		log.Printf("玩家 %s 已从匹配队列中移除\n", playerID)
 	} else {
 		p, ok := r.Players[playerID]
@@ -81,9 +83,6 @@ func MarkPlayerOffline(r *domain.Room, playerID string) (roomDeleted bool) {
 		log.Printf("玩家 %s 标记为离线\n", playerID)
 	}
 
-	if playerID == r.OwnerID {
-		ownerLeft = true
-	}
 	log.Printf("玩家 %s 是否是房主: %v\n", playerID, ownerLeft)
 	if ownerLeft {
 		return transferOwnerOrDelete(r)
