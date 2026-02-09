@@ -24,7 +24,7 @@ func CreateRoom(c *gin.Context) {
 	// id := "3"
 	// name := "wzy"
 
-	userID := fmt.Sprintf("%s-%s", name, id)
+	userID := fmt.Sprintf("%s-%v", name, id)
 
 	roomID, err := service.CreateRoom(userID)
 	if err != nil {
