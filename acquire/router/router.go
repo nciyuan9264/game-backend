@@ -16,7 +16,7 @@ func InitRouter(r *gin.Engine) {
 	{
 		api.POST("/create", controller.CreateRoom)
 		// api.POST("/delete", controller.DeleteRoom)
-		// api.GET("/list", controller.GetRoomList)
+		api.GET("/list", controller.GetRoomList)
 	}
 
 	// WebSocket 路由
