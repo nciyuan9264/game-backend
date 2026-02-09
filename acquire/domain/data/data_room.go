@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"fmt"
+	"go-game/domain/domain"
 	"go-game/dto"
 	"go-game/entities"
 	"go-game/repository"
@@ -43,7 +44,7 @@ func GetRoomInfo(rdb *redis.Client, roomID string) (*entities.RoomInfo, error) {
 	}
 	roomInfo.RoomStatus = roomStatus
 	roomInfo.GameStatus = dto.RoomStatus(roomInfoMap["gameStatus"])
-	roomInfo.UserID = roomInfoMap["userID"]
+	roomInfo.OwnerID = roomInfoMap["ownerID"]
 	// 字符串转 int
 	maxPlayersStr := roomInfoMap["maxPlayers"]
 	if maxPlayersStr != "" {
@@ -66,7 +67,7 @@ func SetRoomInfo(rdb *redis.Client, ctx context.Context, roomID string, info ent
 		"gameStatus": string(info.GameStatus),
 		"roomStatus": roomStatus,
 		"maxPlayers": strconv.Itoa(info.MaxPlayers),
-		"userID":     info.UserID,
+		"ownerID":    info.OwnerID,
 	}
 
 	if err := rdb.HSet(ctx, roomKey, data).Err(); err != nil {
@@ -122,7 +123,7 @@ func GetCurrentPlayer(rdb *redis.Client, ctx context.Context, roomID string) (st
 }
 
 // 初始化玩家数据
-func InitPlayerData(room *dto.Room, playerID string) error {
+func InitPlayerData(room *domain.Room, playerID string) error {
 	// 1. 检查玩家数据是否已存在
 	exists, err := IsPlayerInfoExists(repository.Rdb, repository.Ctx, room.ID, playerID)
 	if err != nil {

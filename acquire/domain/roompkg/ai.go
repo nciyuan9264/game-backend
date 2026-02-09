@@ -1,10 +1,9 @@
-package ws
+package roompkg
 
 import (
 	"encoding/json"
 	"go-game/domain/data"
-	"go-game/domain/game"
-	"go-game/domain/room"
+	"go-game/domain/domain"
 	"go-game/dto"
 	"go-game/repository"
 	"go-game/utils"
@@ -15,8 +14,6 @@ import (
 
 	"golang.org/x/exp/rand"
 )
-
-var _ room.WriteOnlyConn = (*VirtualConn)(nil) // 编译期断言实现
 
 func chooseTileForAI(roomID, playerID string) string {
 	tiles, err := data.GetPlayerTiles(repository.Rdb, repository.Ctx, roomID, playerID)
@@ -87,7 +84,7 @@ func chooseCompanyForAI(roomID string) string {
 	return p3[rand.Intn(len(p3))]
 }
 
-func chooseStocksToBuyForAI(roomID, playerID string) map[string]interface{} {
+func chooseStocksToBuyForAI(roomID, playerID string) map[string]int {
 	companyInfo, err := data.GetCompanyInfo(repository.Rdb, roomID)
 	if err != nil {
 		log.Println("❌ 获取公司信息失败:", err)
@@ -124,7 +121,7 @@ func chooseStocksToBuyForAI(roomID, playerID string) map[string]interface{} {
 	}
 
 	if len(options) == 0 {
-		return map[string]interface{}{}
+		return map[string]int{}
 	}
 
 	// 从便宜到贵排序（贪婪）
@@ -132,7 +129,7 @@ func chooseStocksToBuyForAI(roomID, playerID string) map[string]interface{} {
 		return options[i].Price < options[j].Price
 	})
 
-	result := make(map[string]interface{})
+	result := make(map[string]int)
 	stockCount := 0
 	for _, opt := range options {
 		maxCanBuy := min(3-stockCount, opt.Remain, money/opt.Price)
@@ -140,7 +137,7 @@ func chooseStocksToBuyForAI(roomID, playerID string) map[string]interface{} {
 			continue
 		}
 
-		result[opt.Name] = float64(maxCanBuy)
+		result[opt.Name] = maxCanBuy
 		money -= maxCanBuy * opt.Price
 		stockCount += maxCanBuy
 
@@ -172,6 +169,7 @@ func min2(a, b int) int {
 func IsAIPlayer(playerID string) bool {
 	return strings.HasPrefix(playerID, "ai_") // 简单策略，也可以是数据库字段
 }
+
 func chooseMergingSettleForAI(roomID, playerID string) []dto.MergingSettleItem {
 	playerData, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, playerID)
 	if err != nil {
@@ -373,8 +371,6 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 		time.Sleep(5 * time.Second)
 
 		conn := &VirtualConn{PlayerID: currentPlayerID, RoomID: roomID}
-		rdb := repository.Rdb
-
 		var aiMsg map[string]interface{}
 
 		switch gameStatus {
@@ -384,9 +380,10 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 				log.Println("🤖 AI 未选择有效 tile")
 				return
 			}
+			log.Printf("🤖 AI 选择 tile: %s", tile)
 			aiMsg = map[string]interface{}{
-				"type":    "place_tile",
-				"payload": tile,
+				"type":    "game_place_tile",
+				"payload": map[string]interface{}{"tileKey": tile},
 			}
 		case "createCompany":
 			company := chooseCompanyForAI(roomID)
@@ -395,30 +392,30 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 				return
 			}
 			aiMsg = map[string]interface{}{
-				"type":    "create_company",
-				"payload": company,
+				"type":    "game_create_company",
+				"payload": map[string]interface{}{"company": company},
 			}
 		case "buyStock":
 			stocks := chooseStocksToBuyForAI(roomID, currentPlayerID)
 			aiMsg = map[string]interface{}{
-				"type":    "buy_stock",
-				"payload": stocks,
+				"type":    "game_buy_stock",
+				"payload": map[string]interface{}{"stocks": stocks},
 			}
 		case "mergingSelection":
 			selection := chooseMergingSelectionForAI(roomID, currentPlayerID, mainCompany)
 			aiMsg = map[string]interface{}{
-				"type":    "merging_selection",
-				"payload": selection,
+				"type":    "game_merging_selection",
+				"payload": map[string]interface{}{"mainCompany": selection},
 			}
 		case "mergingSettle":
 			settle := chooseMergingSettleForAI(roomID, playerId)
 			aiMsg = map[string]interface{}{
-				"type":    "merging_settle",
-				"payload": settle,
+				"type":    "game_merging_settle",
+				"payload": map[string]interface{}{"actions": settle},
 			}
 		case "end":
 			aiMsg = map[string]interface{}{
-				"type": "restart_game",
+				"type": "game_restart_game",
 			}
 		default:
 			log.Printf("⚠️ 当前状态 %s 未定义 AI 行为", gameStatus)
@@ -426,14 +423,23 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 		}
 
 		// 加入 playerID 然后交给 handler 执行
-		aiMsg["playerID"] = playerId
-		if handler, found := GameHandlers[aiMsg["type"].(string)]; found {
-			log.Printf("🤖 AI [%s] 执行操作: %s", playerId, aiMsg["type"])
-			handler(conn, rdb, room.Rooms[roomID], playerId, aiMsg)
-			game.BroadcastToRoom(roomID)
-		} else {
-			log.Printf("❌ AI 未找到 handler 类型: %s", aiMsg["type"])
+		// 将 AI 消息转换为 Command 格式，和玩家一样通过通道传递
+		payload, err := json.Marshal(aiMsg["payload"])
+		if err != nil {
+			log.Printf("❌ AI 消息序列化失败: %v", err)
+			return
 		}
+		log.Printf("🤖 AI 发送消息: %s", string(payload))
+
+		// 向房间的命令通道发送消息，和玩家一样的处理方式
+		Rooms[roomID].Room.CmdCh <- domain.Command{
+			Type:     aiMsg["type"].(string),
+			PlayerID: playerId,
+			Payload:  payload,
+			Conn:     conn,
+		}
+
+		log.Printf("🤖 AI [%s] 发送命令: %s", playerId, aiMsg["type"])
 	}()
 
 	return true

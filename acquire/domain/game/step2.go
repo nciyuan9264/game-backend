@@ -2,9 +2,10 @@ package game
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"go-game/domain/data"
-	"go-game/domain/room"
+	"go-game/domain/domain"
 	"go-game/dto"
 	"go-game/repository"
 	"log"
@@ -97,22 +98,30 @@ func UpdatePlayerStockAndMoney(rdb *redis.Client, ctx context.Context, roomID st
 	return nil
 }
 
-type BuyStockRequest struct {
-	Stocks map[string]float64 `json:"stocks"`
+type BuyStockPayload struct {
+	Stocks map[string]int `json:"stocks"`
 }
 
-func HandleBuyStockMessage(conn room.ReadWriteConn, rdb *redis.Client, room *dto.Room, playerID string, msgMap map[string]interface{}) {
-	currentPlayer, err := data.GetCurrentPlayer(rdb, repository.Ctx, room.ID)
+func HandleBuyStockMessage(r *domain.Room, cmd domain.Command) {
+	var p BuyStockPayload
+	if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+		log.Println("❌ 无效的 buy_stock payload:", err)
+		return
+	}
+
+	stocks := p.Stocks
+
+	currentPlayer, err := data.GetCurrentPlayer(repository.Rdb, repository.Ctx, r.ID)
 	if err != nil {
 		log.Println("❌ 获取当前玩家失败:", err)
 		return
 	}
-	if currentPlayer != playerID {
+	if currentPlayer != cmd.PlayerID {
 		log.Println("❌ 不是当前玩家的回合")
 		return
 	}
 
-	roomInfo, err := data.GetRoomInfo(rdb, room.ID)
+	roomInfo, err := data.GetRoomInfo(repository.Rdb, r.ID)
 	if err != nil {
 		log.Println("❌ 获取房间信息失败:", err)
 		return
@@ -120,22 +129,6 @@ func HandleBuyStockMessage(conn room.ReadWriteConn, rdb *redis.Client, room *dto
 	if roomInfo.GameStatus != dto.RoomStatusBuyStock {
 		log.Println("❌ 不是 buyStock 的状态")
 		return
-	}
-	payloadMap, ok := msgMap["payload"].(map[string]interface{})
-	if !ok {
-		log.Println("❌ 股票数据格式错误")
-		return
-	}
-
-	stocks := make(map[string]int)
-
-	for k, v := range payloadMap {
-		// 判断 v 是不是 float64，再转换成 int
-		if f, ok := v.(float64); ok {
-			stocks[k] = int(f)
-		} else {
-			log.Printf("⚠️ 股票值类型错误: key=%s val=%v type=%T\n", k, v, v)
-		}
 	}
 
 	totalPrice := 0
@@ -145,8 +138,8 @@ func HandleBuyStockMessage(conn room.ReadWriteConn, rdb *redis.Client, room *dto
 		count := countVal
 
 		// 获取股价
-		companyKey := fmt.Sprintf("room:%s:company:%s", room.ID, company)
-		priceStr, err := rdb.HGet(repository.Ctx, companyKey, "stockPrice").Result()
+		companyKey := fmt.Sprintf("room:%s:company:%s", r.ID, company)
+		priceStr, err := repository.Rdb.HGet(repository.Ctx, companyKey, "stockPrice").Result()
 		if err != nil {
 			log.Println("❌ 获取股价失败:", company, err)
 			return
@@ -160,7 +153,7 @@ func HandleBuyStockMessage(conn room.ReadWriteConn, rdb *redis.Client, room *dto
 	for company, countVal := range stocks {
 		count := countVal
 		for i := 0; i < count; i++ {
-			if err := UpdateCompanyStockAndTiles(rdb, room.ID, company); err != nil {
+			if err := UpdateCompanyStockAndTiles(repository.Rdb, r.ID, company); err != nil {
 				log.Println("❌ 更新公司失败:", err)
 				return
 			}
@@ -170,22 +163,22 @@ func HandleBuyStockMessage(conn room.ReadWriteConn, rdb *redis.Client, room *dto
 	// 再统一扣钱 & 更新玩家股票
 	for company, countVal := range stocks {
 		count := countVal
-		if err := UpdatePlayerStockAndMoney(rdb, repository.Ctx, room.ID, playerID, company, count, priceMap[company]*count); err != nil {
+		if err := UpdatePlayerStockAndMoney(repository.Rdb, repository.Ctx, r.ID, cmd.PlayerID, company, count, priceMap[company]*count); err != nil {
 			log.Println("❌ 更新玩家失败:", err)
 			return
 		}
 	}
 
-	err = GiveRandomTileToPlayer(rdb, repository.Ctx, room, playerID)
+	err = GiveRandomTileToPlayer(repository.Rdb, repository.Ctx, r, cmd.PlayerID)
 	if err != nil {
 		log.Println("发牌失败:", err)
 	}
 	// 切换玩家
-	if err := SwitchToNextPlayer(rdb, repository.Ctx, room.ID, playerID); err != nil {
+	if err := SwitchToNextPlayer(repository.Rdb, repository.Ctx, r, cmd.PlayerID); err != nil {
 		log.Println("切换玩家失败:", err)
 	}
 	// 最后设置房间状态为 setTile
-	err = data.SetGameStatus(rdb, room.ID, dto.RoomStatusSetTile)
+	err = data.SetGameStatus(repository.Rdb, r.ID, dto.RoomStatusSetTile)
 	if err != nil {
 		log.Println("❌ 设置房间状态失败:", err)
 	}

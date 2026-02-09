@@ -3,12 +3,13 @@ package data
 import (
 	"encoding/json"
 	"fmt"
+	"go-game/domain/domain"
 	"go-game/dto"
 	"go-game/repository"
 	"log"
 )
 
-func GenerateAvailableTiles(room *dto.Room) ([]string, error) {
+func GenerateAvailableTiles(room *domain.Room) ([]string, error) {
 	ctx := repository.Ctx
 	rdb := repository.Rdb
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"go-game/domain/data"
-	"go-game/dto"
+	"go-game/domain/domain"
 	"go-game/utils"
 	"log"
 	"math/rand/v2"
@@ -12,7 +12,7 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-func GiveRandomTileToPlayer(rdb *redis.Client, ctx context.Context, room *dto.Room, playerID string) error {
+func GiveRandomTileToPlayer(rdb *redis.Client, ctx context.Context, room *domain.Room, playerID string) error {
 	allTiles, err := data.GenerateAvailableTiles(room)
 	if err != nil {
 		return fmt.Errorf("生成可用 tiles 失败: %w", err)

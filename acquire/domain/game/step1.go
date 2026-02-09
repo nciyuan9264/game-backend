@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-game/domain/data"
-	"go-game/domain/room"
+	"go-game/domain/domain"
 	"go-game/dto"
 	"go-game/entities"
 	"go-game/repository"
@@ -42,7 +42,7 @@ func placeTile(rdb *redis.Client, ctx context.Context, roomID, playerID, tileKey
 
 func handleMergeProcess(
 	rdb *redis.Client,
-	roomID string,
+	room *domain.Room,
 	mainHotel string,
 	otherHotel []string,
 	hotelTileCount map[string]int,
@@ -61,10 +61,10 @@ func handleMergeProcess(
 		}
 		var holders []holder
 
-		for _, pc := range room.Rooms[roomID].Players {
+		for _, pc := range room.Players {
 			playerID := pc.PlayerID
 			// 获取该玩家所有股票
-			stockMap, err := data.GetPlayerStocks(rdb, repository.Ctx, roomID, playerID)
+			stockMap, err := data.GetPlayerStocks(rdb, repository.Ctx, room.ID, playerID)
 			if err != nil {
 				log.Printf("❌ 获取玩家[%s]股票失败: %v\n", playerID, err)
 				continue
@@ -144,8 +144,9 @@ func handleMergeProcess(
 		}
 
 		for playerID, money := range dividends {
-			if err := data.AddPlayerMoney(rdb, repository.Ctx, roomID, playerID, money); err != nil {
-				log.Println("❌ 累加红利失败:", err)
+			if err := data.AddPlayerMoney(rdb, repository.Ctx, room.ID, playerID, money); err != nil {
+				log.Printf("❌ 累加玩家[%s]红利失败: %v\n", playerID, err)
+				return err
 			}
 		}
 		tempSettleData[hotel] = dto.SettleData{
@@ -154,16 +155,16 @@ func handleMergeProcess(
 		}
 	}
 	// 保存主公司到redis
-	err := data.SetMergeMainCompany(rdb, repository.Ctx, roomID, mainHotel)
+	err := data.SetMergeMainCompany(rdb, repository.Ctx, room.ID, mainHotel)
 	if err != nil {
 		return err
 	}
-	err = data.SetMergeSettleData(repository.Ctx, rdb, roomID, tempSettleData)
+	err = data.SetMergeSettleData(repository.Ctx, rdb, room.ID, tempSettleData)
 	if err != nil {
 		return fmt.Errorf("❌ 保存结算数据失败: %w", err)
 	}
 	// Step 6：设置状态为“并购清算”
-	err = data.SetGameStatus(rdb, roomID, dto.RoomStatusMergingSettle)
+	err = data.SetGameStatus(rdb, room.ID, dto.RoomStatusMergingSettle)
 	if err != nil {
 		log.Println("❌ 设置房间状态失败:", err)
 	}
@@ -171,9 +172,9 @@ func handleMergeProcess(
 	return nil
 }
 
-func HandlePostTilePlacement(rdb *redis.Client, ctx context.Context, roomID, playerID string) error {
+func HandlePostTilePlacement(rdb *redis.Client, ctx context.Context, room *domain.Room, playerID string) error {
 	// 第一步：获取公司信息
-	companyInfo, err := data.GetCompanyInfo(rdb, roomID)
+	companyInfo, err := data.GetCompanyInfo(rdb, room.ID)
 	if err != nil {
 		return fmt.Errorf("获取公司信息失败: %w", err)
 	}
@@ -182,27 +183,27 @@ func HandlePostTilePlacement(rdb *redis.Client, ctx context.Context, roomID, pla
 	for _, info := range companyInfo {
 		if tilesCount := info.Tiles; tilesCount > 0 {
 			// 有公司可买，设置房间状态为“买股票”
-			if err := data.SetGameStatus(rdb, roomID, dto.RoomStatusBuyStock); err != nil {
+			if err := data.SetGameStatus(rdb, room.ID, dto.RoomStatusBuyStock); err != nil {
 				return fmt.Errorf("更新房间状态失败: %w", err)
 			}
 			return nil
 		}
 	}
 	// 发一张 tile
-	if err := GiveRandomTileToPlayer(rdb, repository.Ctx, room.Rooms[roomID], playerID); err != nil {
+	if err := GiveRandomTileToPlayer(rdb, repository.Ctx, room, playerID); err != nil {
 		return fmt.Errorf("发牌失败: %w", err)
 	}
 
 	// 切换玩家
-	if err := SwitchToNextPlayer(rdb, repository.Ctx, roomID, playerID); err != nil {
+	if err := SwitchToNextPlayer(rdb, repository.Ctx, room, playerID); err != nil {
 		log.Println("切换玩家失败:", err)
 	}
 	return nil
 }
 
-func handleMergingLogic(rdb *redis.Client, roomID string, playerID string, hotelSet map[string]struct{}) error {
+func handleMergingLogic(rdb *redis.Client, room *domain.Room, playerID string, hotelSet map[string]struct{}) error {
 	// 统计每个酒店的 tile 数量
-	companyInfo, err := data.GetCompanyInfo(rdb, roomID)
+	companyInfo, err := data.GetCompanyInfo(rdb, room.ID)
 	if err != nil {
 		return fmt.Errorf("获取公司信息失败: %w", err)
 	}
@@ -236,21 +237,21 @@ func handleMergingLogic(rdb *redis.Client, roomID string, playerID string, hotel
 			otherHotel = append(otherHotel, key)
 		}
 		if len(otherHotel) == 0 && maxCount >= 11 {
-			err = data.SetGameStatus(rdb, roomID, dto.RoomStatusBuyStock)
+			err = data.SetGameStatus(rdb, room.ID, dto.RoomStatusBuyStock)
 			if err != nil {
 				log.Println("❌ 设置房间状态失败:", err)
 			}
 			log.Println("没有其他可以合并的公司")
 			return nil
 		}
-		err = data.SetMergingSelection(rdb, repository.Ctx, roomID, entities.MergingSelection{
+		err = data.SetMergingSelection(rdb, repository.Ctx, room.ID, entities.MergingSelection{
 			MainCompany:  topHotels,
 			OtherCompany: otherHotel,
 		})
 		if err != nil {
 			return err
 		}
-		err = data.SetGameStatus(rdb, roomID, dto.RoomStatusMergingSelection)
+		err = data.SetGameStatus(rdb, room.ID, dto.RoomStatusMergingSelection)
 		if err != nil {
 			return err
 		}
@@ -267,14 +268,14 @@ func handleMergingLogic(rdb *redis.Client, roomID string, playerID string, hotel
 			otherHotel = append(otherHotel, key)
 		}
 		if len(otherHotel) == 0 {
-			err = data.SetGameStatus(rdb, roomID, dto.RoomStatusBuyStock)
+			err = data.SetGameStatus(rdb, room.ID, dto.RoomStatusBuyStock)
 			if err != nil {
 				log.Println("❌ 设置房间状态失败:", err)
 			}
 			log.Println("没有其他可以合并的公司")
 			return nil
 		}
-		err = handleMergeProcess(rdb, roomID, mainHotel, otherHotel, hotelTileCount)
+		err = handleMergeProcess(rdb, room, mainHotel, otherHotel, hotelTileCount)
 		if err != nil {
 			return err
 		}
@@ -283,13 +284,13 @@ func handleMergingLogic(rdb *redis.Client, roomID string, playerID string, hotel
 }
 
 // 检查是否有创建、并购、扩建规则触发
-func checkTileTriggerRules(rdb *redis.Client, roomID string, playerID string, tileKey string) error {
+func checkTileTriggerRules(rdb *redis.Client, room *domain.Room, playerID string, tileKey string) error {
 	adjTiles := data.GetAdjacentTileKeys(tileKey)
 	companySet := make(map[string]struct{})
 	blankTileCount := 0
 
 	for _, adjKey := range adjTiles {
-		tile, err := data.GetTileFromRedis(rdb, repository.Ctx, roomID, adjKey)
+		tile, err := data.GetTileFromRedis(rdb, repository.Ctx, room.ID, adjKey)
 		if err != nil {
 			return fmt.Errorf("获取 tile 出错: %w", err)
 		}
@@ -306,7 +307,7 @@ func checkTileTriggerRules(rdb *redis.Client, roomID string, playerID string, ti
 
 	if len(companySet) >= 2 {
 		log.Println("⚠️ 触发并购规则！邻接多个酒店:", companySet)
-		err := handleMergingLogic(rdb, roomID, playerID, companySet)
+		err := handleMergingLogic(rdb, room, playerID, companySet)
 		if err != nil {
 			return err
 		}
@@ -321,17 +322,17 @@ func checkTileTriggerRules(rdb *redis.Client, roomID string, playerID string, ti
 		}
 		company := hotelList[0]
 
-		connectedTiles := data.GetConnectedTiles(rdb, roomID, tileKey)
+		connectedTiles := data.GetConnectedTiles(rdb, room.ID, tileKey)
 		for _, tileKeyBlank := range connectedTiles {
 			// 写回 Redis
-			if err := data.UpdateTileValue(rdb, roomID, tileKeyBlank, dto.Tile{ID: tileKeyBlank, Belong: company}); err != nil {
+			if err := data.UpdateTileValue(rdb, room.ID, tileKeyBlank, dto.Tile{ID: tileKeyBlank, Belong: company}); err != nil {
 				log.Printf("❌ 更新 tile %s 失败: %v", tileKeyBlank, err)
 			} else {
 				log.Printf("✅ 成功更新 tile %s 的归属为 %s", tileKeyBlank, company)
 			}
 		}
 
-		companyKey := fmt.Sprintf("room:%s:company:%s", roomID, company)
+		companyKey := fmt.Sprintf("room:%s:company:%s", room.ID, company)
 		// 获取公司 Hash 数据
 		companyMap, err := rdb.HGetAll(repository.Ctx, companyKey).Result()
 		if err != nil {
@@ -348,7 +349,7 @@ func checkTileTriggerRules(rdb *redis.Client, roomID string, playerID string, ti
 			return fmt.Errorf("公司数据解析失败: %w", err)
 		}
 		// 统计公司 tiles 数量
-		connectedTiles = data.GetConnectedTiles(rdb, roomID, tileKey)
+		connectedTiles = data.GetConnectedTiles(rdb, room.ID, tileKey)
 		companyData.Tiles = len(connectedTiles)
 
 		// 写回 Hash
@@ -360,7 +361,7 @@ func checkTileTriggerRules(rdb *redis.Client, roomID string, playerID string, ti
 		}
 		log.Println("✅ 公司数据已更新:", companyData)
 
-		err = HandlePostTilePlacement(repository.Rdb, repository.Ctx, roomID, playerID)
+		err = HandlePostTilePlacement(repository.Rdb, repository.Ctx, room, playerID)
 		if err != nil {
 			log.Println("处理玩家放置 tile 后逻辑失败:", err)
 		}
@@ -368,7 +369,7 @@ func checkTileTriggerRules(rdb *redis.Client, roomID string, playerID string, ti
 	}
 
 	if blankTileCount >= 1 {
-		companyInfo, err := data.GetCompanyInfo(rdb, roomID)
+		companyInfo, err := data.GetCompanyInfo(rdb, room.ID)
 		if err != nil {
 			return fmt.Errorf("获取公司信息失败: %w", err)
 		}
@@ -380,7 +381,7 @@ func checkTileTriggerRules(rdb *redis.Client, roomID string, playerID string, ti
 			}
 		}
 		if !flag {
-			err = data.SetGameStatus(rdb, roomID, dto.RoomStatusBuyStock)
+			err = data.SetGameStatus(rdb, room.ID, dto.RoomStatusBuyStock)
 			if err != nil {
 				log.Println("❌ 设置房间状态失败:", err)
 			}
@@ -390,33 +391,44 @@ func checkTileTriggerRules(rdb *redis.Client, roomID string, playerID string, ti
 
 		log.Println("⚠️ 触发创建公司规则！创建一个酒店:")
 		// Step 1: 修改房间状态为“创建公司状态”
-		err = data.SetGameStatus(rdb, roomID, dto.RoomStatusCreateCompany)
+		err = data.SetGameStatus(rdb, room.ID, dto.RoomStatusCreateCompany)
 		if err != nil {
 			log.Println("❌ 设置房间状态失败:", err)
 		}
 		return nil
 	}
 
-	err := HandlePostTilePlacement(repository.Rdb, repository.Ctx, roomID, playerID)
+	err := HandlePostTilePlacement(repository.Rdb, repository.Ctx, room, playerID)
 	if err != nil {
 		log.Println("处理玩家放置 tile 后逻辑失败:", err)
 	}
 	return nil
 }
 
+type PlaceTilePayload struct {
+	TileKey string `json:"tileKey"`
+}
+
 // 处理玩家放置 tile 消息
-func HandlePlaceTileMessage(conn room.ReadWriteConn, rdb *redis.Client, room *dto.Room, playerID string, msgMap map[string]interface{}) {
-	currentPlayer, err := data.GetCurrentPlayer(rdb, repository.Ctx, room.ID)
+func HandlePlaceTileMessage(r *domain.Room, cmd domain.Command) {
+	var p PlaceTilePayload
+	if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+		log.Println("无效的 payload:", err)
+		return
+	}
+	tileKey := p.TileKey
+
+	currentPlayer, err := data.GetCurrentPlayer(repository.Rdb, repository.Ctx, r.ID)
 	if err != nil {
 		log.Println("❌ 获取当前玩家失败:", err)
 		return
 	}
-	if currentPlayer != playerID {
+	if currentPlayer != cmd.PlayerID {
 		log.Println("❌ 不是当前玩家的回合")
 		return
 	}
 
-	roomInfo, err := data.GetRoomInfo(rdb, room.ID)
+	roomInfo, err := data.GetRoomInfo(repository.Rdb, r.ID)
 	if err != nil {
 		log.Println("❌ 获取房间信息失败:", err)
 		return
@@ -426,37 +438,44 @@ func HandlePlaceTileMessage(conn room.ReadWriteConn, rdb *redis.Client, room *dt
 		return
 	}
 
-	tileKey, ok := msgMap["payload"].(string)
-	if !ok {
-		log.Println("无效的 payload")
-		return
-	}
 	// Step1: 放置棋子
-	err = placeTile(repository.Rdb, repository.Ctx, room.ID, playerID, tileKey)
+	err = placeTile(repository.Rdb, repository.Ctx, r.ID, cmd.PlayerID, tileKey)
 	if err != nil {
 		log.Println("放置棋子失败", tileKey)
 		return
 	}
 	// Step2: 检查 创建公司/并购公司
-	err = checkTileTriggerRules(repository.Rdb, room.ID, playerID, tileKey)
+	err = checkTileTriggerRules(repository.Rdb, r, cmd.PlayerID, tileKey)
 	if err != nil {
 		log.Println(err)
 		return
 	}
 }
 
-func HandleMergingSelectionMessage(conn room.ReadWriteConn, rdb *redis.Client, room *dto.Room, playerID string, msgMap map[string]interface{}) {
-	currentPlayer, err := data.GetCurrentPlayer(rdb, repository.Ctx, room.ID)
+type MergingSelectionPayload struct {
+	MainCompany string `json:"mainCompany"`
+}
+
+func HandleMergingSelectionMessage(r *domain.Room, cmd domain.Command) {
+
+	var p MergingSelectionPayload
+	if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+		log.Println("无效的 payload:", err)
+		return
+	}
+	maincompany := p.MainCompany
+
+	currentPlayer, err := data.GetCurrentPlayer(repository.Rdb, repository.Ctx, r.ID)
 	if err != nil {
 		log.Println("❌ 获取当前玩家失败:", err)
 		return
 	}
-	if currentPlayer != playerID {
+	if currentPlayer != cmd.PlayerID {
 		log.Println("❌ 不是当前玩家的回合")
 		return
 	}
 
-	roomInfo, err := data.GetRoomInfo(rdb, room.ID)
+	roomInfo, err := data.GetRoomInfo(repository.Rdb, r.ID)
 	if err != nil {
 		log.Println("❌ 获取房间信息失败:", err)
 		return
@@ -465,18 +484,13 @@ func HandleMergingSelectionMessage(conn room.ReadWriteConn, rdb *redis.Client, r
 		log.Println("❌ 不是 merging_selection 的状态")
 		return
 	}
-	maincompany, ok := msgMap["payload"].(string)
-	if !ok {
-		log.Println("❌ 留下的公司格式错误")
-		return
-	}
 
-	mergeSelectionTemp, err := data.GetMergingSelection(rdb, repository.Ctx, room.ID)
+	mergeSelectionTemp, err := data.GetMergingSelection(repository.Rdb, repository.Ctx, r.ID)
 	if err != nil {
 		log.Println("❌ 获取合并选择失败:", err)
 		return
 	}
-	companyInfo, err := data.GetCompanyInfo(rdb, room.ID)
+	companyInfo, err := data.GetCompanyInfo(repository.Rdb, r.ID)
 	if err != nil {
 		log.Println("❌ 获取公司信息失败:", err)
 		return
@@ -505,15 +519,28 @@ func HandleMergingSelectionMessage(conn room.ReadWriteConn, rdb *redis.Client, r
 		}
 	}
 
-	err = handleMergeProcess(rdb, room.ID, maincompany, mergeSelectionTemp.OtherCompany, hotelTileCount)
+	err = handleMergeProcess(repository.Rdb, r, maincompany, mergeSelectionTemp.OtherCompany, hotelTileCount)
 	if err != nil {
 		log.Println("❌ 处理合并过程失败:", err)
 		return
 	}
 }
 
-func HandleMergingSettleMessage(conn room.ReadWriteConn, rdb *redis.Client, room *dto.Room, playerID string, msgMap map[string]interface{}) {
-	roomInfo, err := data.GetRoomInfo(rdb, room.ID)
+type MergingSettlePayload struct {
+	Actions []dto.MergingSettleItem `json:"actions"`
+}
+
+func HandleMergingSettleMessage(r *domain.Room, cmd domain.Command) {
+
+	var p MergingSettlePayload
+	if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+		log.Println("无效的 payload:", err)
+		return
+	}
+
+	settleActions := p.Actions
+
+	roomInfo, err := data.GetRoomInfo(repository.Rdb, r.ID)
 	if err != nil {
 		log.Println("❌ 获取房间信息失败:", err)
 		return
@@ -523,7 +550,7 @@ func HandleMergingSettleMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 		return
 	}
 
-	mergeSettleData, err := data.GetMergeSettleData(repository.Ctx, rdb, room.ID)
+	mergeSettleData, err := data.GetMergeSettleData(repository.Ctx, repository.Rdb, r.ID)
 	if err != nil {
 		log.Printf("❌ 获取合并数据失败: %v\n", err)
 		return
@@ -533,7 +560,7 @@ func HandleMergingSettleMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 	for _, data := range mergeSettleData {
 		oldHoders := data.Hoders
 		for _, h := range oldHoders {
-			if h == playerID {
+			if h == cmd.PlayerID {
 				playerInHoder = true
 			}
 		}
@@ -542,49 +569,49 @@ func HandleMergingSettleMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 		log.Println("❌ 玩家不在任何合并中")
 		return
 	}
-	lockKey := fmt.Sprintf("lock:merge_settle:%s", room.ID)
+	lockKey := fmt.Sprintf("lock:merge_settle:%s", r.ID)
 	lockValue := uuid.NewString()
-	locked, err := rdb.SetNX(repository.Ctx, lockKey, lockValue, 5*time.Second).Result()
+	locked, err := repository.Rdb.SetNX(repository.Ctx, lockKey, lockValue, 5*time.Second).Result()
 	if err != nil || !locked {
-		log.Printf("⚠️ 玩家[%s]尝试结算但加锁失败，可能有人在操作中...\n", playerID)
+		log.Printf("⚠️ 玩家[%s]尝试结算但加锁失败，可能有人在操作中...\n", cmd.PlayerID)
 		return
 	}
 	defer func() {
-		val, err := rdb.Get(repository.Ctx, lockKey).Result()
+		val, err := repository.Rdb.Get(repository.Ctx, lockKey).Result()
 		if err == nil && val == lockValue {
-			rdb.Del(repository.Ctx, lockKey)
+			repository.Rdb.Del(repository.Ctx, lockKey)
 		}
 	}()
 
-	payloadRaw := msgMap["payload"]
+	// payloadRaw := msgMap["payload"]
 
-	// 将 interface{} 编码成 JSON
-	payloadBytes, err := json.Marshal(payloadRaw)
-	if err != nil {
-		log.Println("❌ payload 编码失败:", err)
-		return
-	}
+	// // 将 interface{} 编码成 JSON
+	// payloadBytes, err := json.Marshal(payloadRaw)
+	// if err != nil {
+	// 	log.Println("❌ payload 编码失败:", err)
+	// 	return
+	// }
 
-	// 反序列化为结构体切片
-	var settleActions []dto.MergingSettleItem
-	if err := json.Unmarshal(payloadBytes, &settleActions); err != nil {
-		log.Println("❌ payload 反序列化失败:", err)
-		return
-	}
+	// // 反序列化为结构体切片
+	// var settleActions []dto.MergingSettleItem
+	// if err := json.Unmarshal(payloadBytes, &settleActions); err != nil {
+	// 	log.Println("❌ payload 反序列化失败:", err)
+	// 	return
+	// }
 
-	companyInfo, err := data.GetCompanyInfo(rdb, room.ID)
+	companyInfo, err := data.GetCompanyInfo(repository.Rdb, r.ID)
 	if err != nil {
 		log.Println("❌ 获取公司信息失败:", err)
 		return
 	}
 
-	stockMap, err := data.GetPlayerStocks(rdb, repository.Ctx, room.ID, playerID)
+	stockMap, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, r.ID, cmd.PlayerID)
 	if err != nil {
-		log.Printf("❌ 获取玩家[%s]股票失败: %v\n", playerID, err)
+		log.Printf("❌ 获取玩家[%s]股票失败: %v\n", cmd.PlayerID, err)
 		return
 	}
 
-	mergeMainCompany, err := data.GetMergeMainCompany(rdb, repository.Ctx, room.ID)
+	mergeMainCompany, err := data.GetMergeMainCompany(repository.Rdb, repository.Ctx, r.ID)
 	if err != nil {
 		log.Printf("❌ 获取合并主公司失败: %v\n", err)
 		return
@@ -603,8 +630,8 @@ func HandleMergingSettleMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 		if sellAmount > 0 {
 			stockMap[item.Company] -= sellAmount
 			money := sellAmount * companyData.StockPrice
-			if err := data.AddPlayerMoney(rdb, repository.Ctx, room.ID, playerID, money); err != nil {
-				log.Printf("❌ 扣除玩家[%s]股票失败: %v\n", playerID, err)
+			if err := data.AddPlayerMoney(repository.Rdb, repository.Ctx, r.ID, cmd.PlayerID, money); err != nil {
+				log.Printf("❌ 扣除玩家[%s]股票失败: %v\n", cmd.PlayerID, err)
 				return
 			}
 		}
@@ -616,9 +643,9 @@ func HandleMergingSettleMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 		}
 	}
 
-	err = data.SetPlayerStocks(rdb, repository.Ctx, room.ID, playerID, stockMap)
+	err = data.SetPlayerStocks(repository.Rdb, repository.Ctx, r.ID, cmd.PlayerID, stockMap)
 	if err != nil {
-		log.Printf("❌ 保存玩家[%s]股票失败: %v\n", playerID, err)
+		log.Printf("❌ 保存玩家[%s]股票失败: %v\n", cmd.PlayerID, err)
 		return
 	}
 
@@ -628,7 +655,7 @@ func HandleMergingSettleMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 		oldHoders := data.Hoders
 		newHoders := make([]string, 0)
 		for _, h := range oldHoders {
-			if h != playerID {
+			if h != cmd.PlayerID {
 				newHoders = append(newHoders, h)
 			}
 		}
@@ -641,19 +668,19 @@ func HandleMergingSettleMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 	}
 
 	if allHodersCleared {
-		lastTile, err := data.GetLastTileKey(rdb, repository.Ctx, room.ID)
+		lastTile, err := data.GetLastTileKey(repository.Rdb, repository.Ctx, r.ID)
 		if err != nil {
 			log.Printf("❌ 获取当前创建公司 tile key 失败: %v\n", err)
 			return
 		}
 
-		connTile := data.GetConnectedTiles(rdb, room.ID, lastTile)
+		connTile := data.GetConnectedTiles(repository.Rdb, r.ID, lastTile)
 		connTileSet := make(map[string]struct{})
 		for _, id := range connTile {
 			connTileSet[id] = struct{}{}
 		}
 
-		tileMap, err := data.GetAllRoomTiles(rdb, room.ID)
+		tileMap, err := data.GetAllRoomTiles(repository.Rdb, r.ID)
 		if err != nil {
 			log.Printf("❌ 获取房间 tile 信息失败: %v\n", err)
 			return
@@ -674,7 +701,7 @@ func HandleMergingSettleMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 			}
 		}
 
-		err = data.SetAllRoomTiles(rdb, room.ID, tileMap)
+		err = data.SetAllRoomTiles(repository.Rdb, r.ID, tileMap)
 		if err != nil {
 			log.Printf("❌ 保存房间 tile 信息失败: %v\n", err)
 			return
@@ -685,14 +712,14 @@ func HandleMergingSettleMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 		}
 		adj := data.GetAdjacentTileKeys(lastTile)
 		for _, key := range adj {
-			tile, err := data.GetTileFromRedis(rdb, repository.Ctx, room.ID, key)
+			tile, err := data.GetTileFromRedis(repository.Rdb, repository.Ctx, r.ID, key)
 			if err != nil {
 				log.Printf("❌ 获取 tileBelong 失败: %v\n", err)
 				return
 			}
 			if tile.Belong == "Blank" {
 				tile.Belong = mergeMainCompany
-				err = data.UpdateTileValue(rdb, room.ID, key, tile)
+				err = data.UpdateTileValue(repository.Rdb, r.ID, key, tile)
 				if err != nil {
 					log.Printf("❌ 更新 tileBelong 失败: %v\n", err)
 					return
@@ -700,36 +727,48 @@ func HandleMergingSettleMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 			}
 		}
 
-		err = data.SetGameStatus(rdb, room.ID, dto.RoomStatusBuyStock)
+		err = data.SetGameStatus(repository.Rdb, r.ID, dto.RoomStatusBuyStock)
 		if err != nil {
 			log.Printf("❌ 设置游戏状态失败: %v\n", err)
 			return
 		}
-		if err := data.SetMergeSettleData(repository.Ctx, rdb, room.ID, map[string]dto.SettleData{}); err != nil {
+		if err := data.SetMergeSettleData(repository.Ctx, repository.Rdb, r.ID, map[string]dto.SettleData{}); err != nil {
 			log.Printf("❌ 保存结算数据失败: %v\n", err)
 			return
 		}
 	} else {
 		// 保存结果
-		if err := data.SetMergeSettleData(repository.Ctx, rdb, room.ID, mergeSettleData); err != nil {
+		if err := data.SetMergeSettleData(repository.Ctx, repository.Rdb, r.ID, mergeSettleData); err != nil {
 			log.Printf("❌ 保存结算数据失败: %v\n", err)
 			return
 		}
 	}
 }
 
-func HandleCreateCompanyMessage(conn room.ReadWriteConn, rdb *redis.Client, room *dto.Room, playerID string, msgMap map[string]interface{}) {
-	currentPlayer, err := data.GetCurrentPlayer(rdb, repository.Ctx, room.ID)
+type CreateCompanyPayload struct {
+	Company string `json:"company"`
+}
+
+func HandleCreateCompanyMessage(r *domain.Room, cmd domain.Command) {
+	var p CreateCompanyPayload
+	if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+		log.Println("无效的 payload:", err)
+		return
+	}
+	company := p.Company
+	log.Println("✅ 收到 create_company 消息，目标 company:", company)
+
+	currentPlayer, err := data.GetCurrentPlayer(repository.Rdb, repository.Ctx, r.ID)
 	if err != nil {
 		log.Println("❌ 获取当前玩家失败:", err)
 		return
 	}
-	if currentPlayer != playerID {
+	if currentPlayer != cmd.PlayerID {
 		log.Println("❌ 不是当前玩家的回合")
 		return
 	}
 
-	roomInfo, err := data.GetRoomInfo(rdb, room.ID)
+	roomInfo, err := data.GetRoomInfo(repository.Rdb, r.ID)
 	if err != nil {
 		log.Println("❌ 获取房间信息失败:", err)
 		return
@@ -739,16 +778,9 @@ func HandleCreateCompanyMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 		return
 	}
 
-	company, ok := msgMap["payload"].(string)
-	if !ok {
-		log.Println("❌ 无效的 payload")
-		return
-	}
-	log.Println("✅ 收到 create_company 消息，目标 company:", company)
-
 	// Step 1: 取出 createTileKey
-	createTileKey := fmt.Sprintf("room:%s:last_tile_key_temp", room.ID)
-	tileKey, err := rdb.Get(repository.Ctx, createTileKey).Result()
+	createTileKey := fmt.Sprintf("room:%s:last_tile_key_temp", r.ID)
+	tileKey, err := repository.Rdb.Get(repository.Ctx, createTileKey).Result()
 	if err != nil {
 		log.Println("❌ 获取 createTileKey 失败:", err)
 		return
@@ -756,10 +788,10 @@ func HandleCreateCompanyMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 	log.Println("✅ 创建公司使用的 tileKey:", tileKey)
 
 	// Step 2: 修改公司数据（仍用 Hash 类型保存）
-	companyKey := fmt.Sprintf("room:%s:company:%s", room.ID, company)
+	companyKey := fmt.Sprintf("room:%s:company:%s", r.ID, company)
 
 	// 获取公司 Hash 数据
-	companyMap, err := rdb.HGetAll(repository.Ctx, companyKey).Result()
+	companyMap, err := repository.Rdb.HGetAll(repository.Ctx, companyKey).Result()
 	if err != nil {
 		log.Println("❌ 获取公司 Hash 数据失败:", err)
 		return
@@ -781,7 +813,7 @@ func HandleCreateCompanyMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 		return
 	}
 	// 统计公司 tiles 数量
-	connectedTiles := data.GetConnectedTiles(rdb, room.ID, tileKey)
+	connectedTiles := data.GetConnectedTiles(repository.Rdb, r.ID, tileKey)
 	companyData.Tiles = len(connectedTiles)
 	companyData.StockTotal--
 
@@ -791,14 +823,14 @@ func HandleCreateCompanyMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 		"stockTotal": companyData.StockTotal,
 	}
 
-	if err := rdb.HSet(repository.Ctx, companyKey, companyUpdateMap).Err(); err != nil {
+	if err := repository.Rdb.HSet(repository.Ctx, companyKey, companyUpdateMap).Err(); err != nil {
 		log.Println("❌ 写回公司数据失败:", err)
 		return
 	}
 
 	log.Println("✅ 公司数据已更新:", companyData)
 
-	tileMap, err := data.GetAllRoomTiles(rdb, room.ID)
+	tileMap, err := data.GetAllRoomTiles(repository.Rdb, r.ID)
 	if err != nil {
 		log.Println("❌ 获取房间所有 tile 数据失败:", err)
 		return
@@ -815,15 +847,15 @@ func HandleCreateCompanyMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 		tile.Belong = company
 
 		// 写回 Redis
-		if err := data.UpdateTileValue(rdb, room.ID, tileKey, tile); err != nil {
+		if err := data.UpdateTileValue(repository.Rdb, r.ID, tileKey, tile); err != nil {
 			log.Printf("❌ 更新 tile %s 失败: %v", tileKey, err)
 		} else {
 			log.Printf("✅ 成功更新 tile %s 的归属为 %s", tileKey, company)
 		}
 	}
 	// Step 3: 增加玩家的股票数据
-	playerStockKey := fmt.Sprintf("room:%s:player:%s:stocks", room.ID, playerID)
-	if err := rdb.HIncrBy(repository.Ctx, playerStockKey, company, 1).Err(); err != nil {
+	playerStockKey := fmt.Sprintf("room:%s:player:%s:stocks", r.ID, cmd.PlayerID)
+	if err := repository.Rdb.HIncrBy(repository.Ctx, playerStockKey, company, 1).Err(); err != nil {
 		log.Println("❌ 增加玩家股票失败:", err)
 		return
 	}
@@ -832,7 +864,7 @@ func HandleCreateCompanyMessage(conn room.ReadWriteConn, rdb *redis.Client, room
 	// Step 4: 清除 createTileKey
 	// _ = rdb.Del(repository.Ctx, createTileKey).Err()
 	// Step 5:🔥 清除玩家的 tile
-	if err := data.SetGameStatus(rdb, room.ID, dto.RoomStatusBuyStock); err != nil {
+	if err := data.SetGameStatus(repository.Rdb, r.ID, dto.RoomStatusBuyStock); err != nil {
 		log.Println("❌ 设置房间状态失败:", err)
 	}
 }

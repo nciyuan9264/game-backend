@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-game/domain/data"
-	"go-game/domain/room"
+	"go-game/domain/domain"
 	"go-game/dto"
 	"go-game/entities"
 	"go-game/repository"
@@ -220,13 +220,12 @@ func SyncRoomMessage(conn dto.ConnInterface, roomID string, playerID string, res
 	return conn.WriteMessage(websocket.TextMessage, data)
 }
 
-func SyncMatchMessage(conn dto.ConnInterface, roomID string, playerID string, roomInfo *dto.Room) error {
-
+func SyncMatchMessage(conn dto.ConnInterface, roomID string, playerID string, roomInfo *domain.Room) error {
 	msg := struct {
-		Type     string    `json:"type"`
-		RoomID   string    `json:"roomID"`
-		PlayerID string    `json:"playerID"`
-		Room     *dto.Room `json:"room"`
+		Type     string       `json:"type"`
+		RoomID   string       `json:"roomID"`
+		PlayerID string       `json:"playerID"`
+		Room     *domain.Room `json:"room"`
 	}{
 		Type:     "MATCH_SYNC",
 		RoomID:   roomID,
@@ -250,14 +249,14 @@ func SyncMatchMessage(conn dto.ConnInterface, roomID string, playerID string, ro
 }
 
 // 广播消息给房间内所有连接成功的玩家
-func BroadcastToRoom(roomID string) {
-	companyInfoMap, err := data.GetCompanyInfo(repository.Rdb, roomID)
+func BroadcastToRoom(room *domain.Room) {
+	companyInfoMap, err := data.GetCompanyInfo(repository.Rdb, room.ID)
 	if err != nil {
 		log.Println("获取公司信息失败:", err)
 		return
 	}
 
-	tileMap, err := data.GetAllRoomTiles(repository.Rdb, roomID)
+	tileMap, err := data.GetAllRoomTiles(repository.Rdb, room.ID)
 	if err != nil {
 		log.Println("获取所有 tile 失败:", err)
 		return
@@ -270,8 +269,8 @@ func BroadcastToRoom(roomID string) {
 	}
 
 	allStockMap := make(map[string]int)
-	for _, pc := range room.Rooms[roomID].Players {
-		stockMap, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, pc.PlayerID)
+	for _, pc := range room.Players {
+		stockMap, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, room.ID, pc.PlayerID)
 		if err != nil {
 			log.Printf("❌ 获取玩家[%s]股票失败: %v\n", pc.PlayerID, err)
 			return
@@ -290,20 +289,20 @@ func BroadcastToRoom(roomID string) {
 		companyInfoMap[companyName] = info
 	}
 
-	err = data.SetCompanyInfo(repository.Rdb, roomID, companyInfoMap)
+	err = data.SetCompanyInfo(repository.Rdb, room.ID, companyInfoMap)
 	if err != nil {
 		log.Println("❌ 设置公司信息失败:", err)
 		return
 	}
 
 	result := make(map[string]int)
-	for _, pc := range room.Rooms[roomID].Players {
-		playerStocks, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, pc.PlayerID)
+	for _, pc := range room.Players {
+		playerStocks, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, room.ID, pc.PlayerID)
 		if err != nil {
 			log.Printf("❌ 获取玩家[%s]股票失败: %v\n", pc.PlayerID, err)
 			continue
 		}
-		playerInfo, err := data.GetPlayerInfoField(repository.Rdb, repository.Ctx, roomID, pc.PlayerID, "money")
+		playerInfo, err := data.GetPlayerInfoField(repository.Rdb, repository.Ctx, room.ID, pc.PlayerID, "money")
 		if err != nil {
 			log.Printf("❌ 获取玩家[%s]金钱失败: %v\n", pc.PlayerID, err)
 			continue
@@ -311,10 +310,10 @@ func BroadcastToRoom(roomID string) {
 		result[pc.PlayerID] = CalculateTotalValue(playerStocks, companyInfoMap) + playerInfo.Money
 	}
 
-	for _, pc := range room.Rooms[roomID].Players {
+	for _, pc := range room.Players {
 		if pc.Online {
 			// 尝试发送消息
-			if err := SyncRoomMessage(pc.Conn, roomID, pc.PlayerID, result); err != nil {
+			if err := SyncRoomMessage(pc.Conn, room.ID, pc.PlayerID, result); err != nil {
 				log.Println("广播失败，移除连接:", pc.PlayerID)
 				pc.Conn.Close()
 			}
@@ -322,36 +321,31 @@ func BroadcastToRoom(roomID string) {
 	}
 }
 
-func SnapshotRoom(r *dto.Room) *dto.Room {
+func SnapshotRoom(r *domain.Room) *domain.Room {
 	copyRoom := *r
-	copyRoom.Players = make([]*dto.PlayerConn, 0, len(r.Players))
+	copyRoom.Players = make(map[string]*dto.PlayerConn)
 
 	for _, p := range r.Players {
 		cp := *p
-		copyRoom.Players = append(copyRoom.Players, &cp)
+		copyRoom.Players[p.PlayerID] = &cp
 	}
 
 	return &copyRoom
 }
 
-func BroadcastToMatch(roomID string) {
-	r, ok := room.Rooms[roomID]
-	if !ok {
-		log.Println("房间不存在:", roomID)
-		return
-	}
+func BroadcastToMatch(room *domain.Room) {
 
 	// 生成一次快照，所有人共用
-	snapshot := SnapshotRoom(r)
+	snapshot := SnapshotRoom(room)
 
-	for _, pc := range r.Players {
+	for _, pc := range room.Players {
 		if !pc.Online {
 			continue
 		}
 
 		if err := SyncMatchMessage(
 			pc.Conn,
-			roomID,
+			room.ID,
 			pc.PlayerID,
 			snapshot,
 		); err != nil {

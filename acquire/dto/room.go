@@ -44,15 +44,8 @@ type Tile struct {
 
 type PlayerConn struct {
 	PlayerID string        `json:"playerID"`
-	Conn     ConnInterface `json:"conn"`
+	Conn     ConnInterface `json:"-"`
 	Online   bool          `json:"online"`
 	Ready    bool          `json:"ready"`
 	AI       bool          `json:"ai"`
-}
-
-type Room struct {
-	ID      string        `json:"roomID"`
-	OwnerID string        `json:"ownerID"`
-	Status  RoomStatus    `json:"status"`
-	Players []*PlayerConn `json:"players"`
 }

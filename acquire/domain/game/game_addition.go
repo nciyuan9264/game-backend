@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-game/domain/data"
-	"go-game/domain/room"
+	"go-game/domain/domain"
 	"go-game/dto"
 	"go-game/repository"
 	"go-game/utils"
@@ -17,47 +17,59 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func SwitchToNextPlayer(rdb *redis.Client, ctx context.Context, roomID, currentID string) error {
-	room.RoomLock.Lock()
-	defer room.RoomLock.Unlock()
+func SwitchToNextPlayer(
+	rdb *redis.Client,
+	ctx context.Context,
+	r *domain.Room,
+	currentPlayerID string,
+) error {
 
-	room := room.Rooms[roomID]
-	if room == nil || len(room.Players) == 0 {
-		return fmt.Errorf("房间 %s 没有玩家", roomID)
+	if r == nil || len(r.PlayerSeq) == 0 {
+		return fmt.Errorf("房间 %s 没有玩家", r.ID)
 	}
 
-	// 找到当前玩家索引
-	var currentIndex int = -1
-	for i, pc := range room.Players {
-		if pc.PlayerID == currentID {
-			currentIndex = i
+	// 1️⃣ 找到当前玩家在顺序表中的索引
+	currentIdx := -1
+	for i, pid := range r.PlayerSeq {
+		if pid == currentPlayerID {
+			currentIdx = i
 			break
 		}
 	}
 
-	if currentIndex == -1 {
-		return fmt.Errorf("未找到当前玩家 %s", currentID)
+	if currentIdx == -1 {
+		return fmt.Errorf("未找到当前玩家 %s", currentPlayerID)
 	}
 
-	// 下一个玩家索引（循环）
-	nextIndex := (currentIndex + 1) % len(room.Players)
-	nextPlayerID := room.Players[nextIndex].PlayerID
+	// 2️⃣ 计算下一个玩家索引（循环）
+	nextIdx := (currentIdx + 1) % len(r.PlayerSeq)
+	nextPlayerID := r.PlayerSeq[nextIdx]
 
-	// 设置当前玩家
-	if err := data.SetCurrentPlayer(rdb, ctx, roomID, nextPlayerID); err != nil {
+	// 3️⃣ 校验玩家是否仍存在（防止中途退出）
+	if _, ok := r.Players[nextPlayerID]; !ok {
+		return fmt.Errorf("下一个玩家 %s 不存在", nextPlayerID)
+	}
+
+	// 4️⃣ 设置当前玩家（持久化）
+	if err := data.SetCurrentPlayer(rdb, ctx, r.ID, nextPlayerID); err != nil {
 		return fmt.Errorf("切换当前玩家失败: %w", err)
 	}
 
-	log.Printf("✅ 已将当前玩家切换为: %s\n", nextPlayerID)
+	log.Printf("✅ 房间 %s 当前玩家切换为: %s\n", r.ID, nextPlayerID)
 	return nil
 }
 
-func HandlePlayAudioMessage(conn room.ReadWriteConn, rdb *redis.Client, room *dto.Room, playerID string, msgMap map[string]interface{}) {
-	audioType, ok := msgMap["payload"].(string)
-	if !ok {
-		log.Println("❌ 消息格式错误")
+type PlayAudioPayload struct {
+	AudioType string `json:"audioType"`
+}
+
+func HandlePlayAudioMessage(r *domain.Room, cmd domain.Command) {
+	var p PlayAudioPayload
+	if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+		log.Println("❌ 消息格式错误:", err)
 		return
 	}
+	audioType := p.AudioType
 
 	msg := map[string]interface{}{
 		"type":    "audio",
@@ -69,7 +81,7 @@ func HandlePlayAudioMessage(conn room.ReadWriteConn, rdb *redis.Client, room *dt
 		return
 	}
 
-	for _, pc := range room.Players {
+	for _, pc := range r.Players {
 		if pc.Online && pc.Conn != nil {
 			err := pc.Conn.WriteMessage(websocket.TextMessage, data)
 			if err != nil {
@@ -79,16 +91,16 @@ func HandlePlayAudioMessage(conn room.ReadWriteConn, rdb *redis.Client, room *dt
 	}
 }
 
-func HandleRestartGameMessage(conn room.ReadWriteConn, rdb *redis.Client, room *dto.Room, playerID string, msgMap map[string]interface{}) {
+func HandleRestartGameMessage(r *domain.Room, cmd domain.Command) {
 	// 重置上次落子
-	if err := data.SetLastTileKey(rdb, repository.Ctx, room.ID, playerID, ""); err != nil {
+	if err := data.SetLastTileKey(repository.Rdb, repository.Ctx, r.ID, cmd.PlayerID, ""); err != nil {
 		log.Println("❌ 设置最后放置的 tile 失败:", err)
 		return
 	}
 	// 重置游戏状态
-	room.Status = dto.RoomStatusSetTile
+	r.Status = dto.RoomStatusMatch
 	// 重置tiles
-	tile, err := data.GetAllRoomTiles(rdb, room.ID)
+	tile, err := data.GetAllRoomTiles(repository.Rdb, r.ID)
 	if err != nil {
 		log.Println("❌ 获取所有 tile 失败:", err)
 		return
@@ -97,31 +109,31 @@ func HandleRestartGameMessage(conn room.ReadWriteConn, rdb *redis.Client, room *
 		tileInfo.Belong = ""
 		tile[tileKey] = tileInfo
 	}
-	err = data.SetAllRoomTiles(rdb, room.ID, tile)
+	err = data.SetAllRoomTiles(repository.Rdb, r.ID, tile)
 	if err != nil {
 		log.Println("❌ 重置 tile 失败:", err)
 		return
 	}
 
-	for _, pc := range room.Players {
+	for _, pc := range r.Players {
 		playerID := pc.PlayerID
 		// 2. 设置初始资金
-		err = data.SetPlayerInfoField(repository.Rdb, repository.Ctx, room.ID, playerID, "money", 6000)
+		err = data.SetPlayerInfoField(repository.Rdb, repository.Ctx, r.ID, playerID, "money", 6000)
 		if err != nil {
 			log.Println("设置玩家信息失败:", err)
 		}
 
-		allTiles, err := data.GenerateAvailableTiles(room)
+		allTiles, err := data.GenerateAvailableTiles(r)
 		if err != nil {
 			log.Println(err)
 		}
 		rand.Shuffle(len(allTiles), func(i, j int) { allTiles[i], allTiles[j] = allTiles[j], allTiles[i] })
 		playerTiles := utils.SafeSlice(allTiles, 5)
-		err = data.SetPlayerTiles(repository.Rdb, repository.Ctx, room.ID, playerID, playerTiles)
+		err = data.SetPlayerTiles(repository.Rdb, repository.Ctx, r.ID, playerID, playerTiles)
 		if err != nil {
 			log.Println(err)
 		}
-		companyIDs, err := data.GetCompanyIDs(room.ID)
+		companyIDs, err := data.GetCompanyIDs(r.ID)
 		if err != nil {
 			log.Println("获取公司ID失败:", err)
 			return
@@ -131,7 +143,7 @@ func HandleRestartGameMessage(conn room.ReadWriteConn, rdb *redis.Client, room *
 		for _, company := range companyIDs {
 			playerStocks[company] = 0
 		}
-		err = data.SetPlayerStocks(repository.Rdb, repository.Ctx, room.ID, playerID, playerStocks)
+		err = data.SetPlayerStocks(repository.Rdb, repository.Ctx, r.ID, playerID, playerStocks)
 		if err != nil {
 			log.Println("写入玩家股票失败:", err)
 		}
@@ -183,16 +195,12 @@ func HandleRestartGameMessage(conn room.ReadWriteConn, rdb *redis.Client, room *
 	}
 
 	for id, data := range companyData {
-		companyKey := fmt.Sprintf("room:%s:company:%s", room.ID, id)
-		if _, err := rdb.HSet(repository.Ctx, companyKey, data).Result(); err != nil {
+		companyKey := fmt.Sprintf("room:%s:company:%s", r.ID, id)
+		if _, err := repository.Rdb.HSet(repository.Ctx, companyKey, data).Result(); err != nil {
 			return
 		}
-		rdb.SAdd(repository.Ctx, fmt.Sprintf("room:%s:company_ids", room.ID), id)
+		repository.Rdb.SAdd(repository.Ctx, fmt.Sprintf("room:%s:company_ids", r.ID), id)
 	}
-	startKey := fmt.Sprintf("room:%s:game_start_time", room.ID)
+	startKey := fmt.Sprintf("room:%s:game_start_time", r.ID)
 	repository.Rdb.Set(repository.Ctx, startKey, time.Now().Format("20060102_150405"), 0)
-
-	time.Sleep(2 * time.Second)
-
-	BroadcastToRoom(room.ID)
 }

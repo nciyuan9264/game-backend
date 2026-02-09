@@ -3,27 +3,25 @@ package service
 import (
 	"fmt"
 	"go-game/domain/data"
-	"go-game/domain/room"
+	"go-game/domain/roompkg"
 	"go-game/dto"
 	"go-game/repository"
 	"time"
 )
 
 func CreateRoom(userID string) (string, error) {
-	// 简洁的时间前缀：月日_时分秒
 	timePrefix := time.Now().Format("0102_150405")
-	// roomID 示例：0620_153045_dA9X
-	roomID := fmt.Sprintf("%s", timePrefix)
+	roomID := timePrefix
 
-	newRoom := &dto.Room{
-		ID:      roomID,
-		OwnerID: userID,
-		Status:  dto.RoomStatusMatch,
-		Players: make([]*dto.PlayerConn, 0),
-	}
+	newRoom := roompkg.NewRoomService(roomID, userID)
 
-	room.Rooms[roomID] = newRoom
-	fmt.Println("newRoom", newRoom)
+	roompkg.RoomLock.Lock()
+	roompkg.Rooms[roomID] = newRoom
+	roompkg.RoomLock.Unlock()
+
+	go newRoom.Run()
+
+	fmt.Println("newRoom created:", roomID)
 	return roomID, nil
 }
 
@@ -146,46 +144,46 @@ func CreateRoom(userID string) (string, error) {
 // 	return roomID, nil
 // }
 
-func DeleteRoom(params dto.DeleteRoomRequest) error {
-	ctx := repository.Ctx
-	rdb := repository.Rdb
+// func DeleteRoom(params dto.DeleteRoomRequest) error {
+// 	ctx := repository.Ctx
+// 	rdb := repository.Rdb
 
-	// 用 SCAN 查找所有以 room:{RoomID}: 开头的 key
-	prefix := fmt.Sprintf("room:%s:", params.RoomID)
-	var cursor uint64
-	var keysToDelete []string
+// 	// 用 SCAN 查找所有以 room:{RoomID}: 开头的 key
+// 	prefix := fmt.Sprintf("room:%s:", params.RoomID)
+// 	var cursor uint64
+// 	var keysToDelete []string
 
-	for {
-		keys, cur, err := rdb.Scan(ctx, cursor, prefix+"*", 100).Result()
-		if err != nil {
-			return fmt.Errorf("扫描房间相关 key 失败: %w", err)
-		}
-		keysToDelete = append(keysToDelete, keys...)
-		cursor = cur
-		if cursor == 0 {
-			break
-		}
-	}
+// 	for {
+// 		keys, cur, err := rdb.Scan(ctx, cursor, prefix+"*", 100).Result()
+// 		if err != nil {
+// 			return fmt.Errorf("扫描房间相关 key 失败: %w", err)
+// 		}
+// 		keysToDelete = append(keysToDelete, keys...)
+// 		cursor = cur
+// 		if cursor == 0 {
+// 			break
+// 		}
+// 	}
 
-	if len(keysToDelete) == 0 {
-		return fmt.Errorf("房间不存在或无相关数据")
-	}
+// 	if len(keysToDelete) == 0 {
+// 		return fmt.Errorf("房间不存在或无相关数据")
+// 	}
 
-	// 批量删除这些 key
-	if _, err := rdb.Del(ctx, keysToDelete...).Result(); err != nil {
-		return fmt.Errorf("删除房间相关 key 失败: %w", err)
-	}
-	delete(room.Rooms, params.RoomID)
+// 	// 批量删除这些 key
+// 	if _, err := rdb.Del(ctx, keysToDelete...).Result(); err != nil {
+// 		return fmt.Errorf("删除房间相关 key 失败: %w", err)
+// 	}
+// 	delete(room.Rooms, params.RoomID)
 
-	return nil
-}
+// 	return nil
+// }
 
 func GetRoomList() ([]dto.RoomInfo, error) {
 	// rdb := repository.Rdb
 	var rooms []dto.RoomInfo
-	for roomID, roomConnInfo := range room.Rooms {
-		roomPlayers := make([]dto.RoomPlayer, 0, len(roomConnInfo.Players))
-		for _, player := range roomConnInfo.Players {
+	for roomID, roomConnInfo := range roompkg.Rooms {
+		roomPlayers := make([]dto.RoomPlayer, 0, len(roomConnInfo.Room.Players))
+		for _, player := range roomConnInfo.Room.Players {
 			roomPlayers = append(roomPlayers, dto.RoomPlayer{
 				PlayerID: player.PlayerID,
 				Online:   player.Online,
@@ -207,8 +205,8 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 
 		room := dto.RoomInfo{
 			RoomID:         roomID,
-			OwnerID:        roomConnInfo.OwnerID,
-			Status:         roomConnInfo.Status,
+			OwnerID:        roomConnInfo.Room.OwnerID,
+			Status:         roomConnInfo.Room.Status,
 			RoomPlayer:     roomPlayers,
 			EmptyTileCount: emptyTileCount,
 		}
@@ -216,16 +214,4 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 	}
 
 	return rooms, nil
-}
-
-func GetOnlinePlayer() (int, error) {
-	onlinePlayer := 0
-	for _, room := range room.Rooms {
-		for _, player := range room.Players {
-			if player.Online {
-				onlinePlayer++
-			}
-		}
-	}
-	return onlinePlayer, nil
 }

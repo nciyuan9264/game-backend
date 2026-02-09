@@ -1,8 +1,6 @@
 package ws
 
 import (
-	"go-game/domain/room"
-	"go-game/dto"
 	"log"
 	"net/http"
 
@@ -24,14 +22,14 @@ func upgradeConnection(c *gin.Context) (*websocket.Conn, error) {
 }
 
 // GetConn 用于根据 roomID 和 playerID 获取对应的 WebSocket 连接
-func GetConn(roomID string, playerID string) (dto.ConnInterface, error) {
-	players := room.Rooms[roomID].Players
-	var conn dto.ConnInterface
-	for _, p := range players {
-		if p.PlayerID == playerID {
-			conn = p.Conn
-			break
-		}
-	}
-	return conn, nil
-}
+// func GetConn(roomID string, playerID string) (dto.ConnInterface, error) {
+// 	players := room.Rooms[roomID].Players
+// 	var conn dto.ConnInterface
+// 	for _, p := range players {
+// 		if p.PlayerID == playerID {
+// 			conn = p.Conn
+// 			break
+// 		}
+// 	}
+// 	return conn, nil
+// }

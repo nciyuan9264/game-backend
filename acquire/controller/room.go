@@ -10,19 +10,19 @@ import (
 )
 
 func CreateRoom(c *gin.Context) {
-	// id, exists := c.Get("user_id")
-	// if !exists {
-	// 	c.JSON(http.StatusUnauthorized, gin.H{"error": "user_id not found"})
-	// 	return
-	// }
-	// name, exists := c.Get("name")
-	// if !exists {
-	// 	c.JSON(http.StatusUnauthorized, gin.H{"error": "name not found"})
-	// 	return
-	// }
+	id, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user_id not found"})
+		return
+	}
+	name, exists := c.Get("name")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "name not found"})
+		return
+	}
 
-	id := "3"
-	name := "wzy"
+	// id := "3"
+	// name := "wzy"
 
 	userID := fmt.Sprintf("%s-%s", name, id)
 
@@ -41,44 +41,22 @@ func CreateRoom(c *gin.Context) {
 	})
 }
 
-// func CreateRoom(c *gin.Context) {
-// 	var req dto.CreateRoomRequest
+// func DeleteRoom(c *gin.Context) {
+// 	var req dto.DeleteRoomRequest
 // 	if err := c.ShouldBindJSON(&req); err != nil {
 // 		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少必要字段"})
 // 		return
 // 	}
-
-// 	roomID, err := service.CreateRoom(req)
+// 	err := service.DeleteRoom(req)
 // 	if err != nil {
 // 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 // 		return
 // 	}
-
 // 	c.JSON(http.StatusOK, gin.H{
 // 		"status_code": http.StatusOK,
-// 		"message":     "房间创建成功",
-// 		"data": dto.CreateRoomResponse{
-// 			Room_id: roomID,
-// 		},
+// 		"message":     "房间删除成功",
 // 	})
 // }
-
-func DeleteRoom(c *gin.Context) {
-	var req dto.DeleteRoomRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少必要字段"})
-		return
-	}
-	err := service.DeleteRoom(req)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"status_code": http.StatusOK,
-		"message":     "房间删除成功",
-	})
-}
 
 func GetRoomList(c *gin.Context) {
 	rooms, err := service.GetRoomList()
