@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"go-game/domain/domain"
 	"go-game/domain/roompkg"
+	"go-game/dto"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -46,22 +47,22 @@ func HandleWebSocket(c *gin.Context) {
 		return
 	}
 
+	// 创建 RealConn 实例
+	realConn := dto.NewRealConn(conn)
+
 	// 1️⃣ 解析参数（保持不变）
 	roomID := c.Query("roomID")
 	playerID := c.Query("userID")
 	if roomID == "" || playerID == "" {
-		conn.Close()
+		realConn.Close()
 		return
 	}
 
 	// 2️⃣ 拿房间（只读，不改）
 	room := roompkg.Rooms[roomID]
 	if room == nil {
-		conn.WriteJSON(map[string]string{
-			"type":    "error",
-			"message": "ROOM_NOT_FOUND",
-		})
-		conn.Close()
+		realConn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"ROOM_NOT_FOUND"}`))
+		realConn.Close()
 		return
 	}
 
@@ -69,9 +70,9 @@ func HandleWebSocket(c *gin.Context) {
 	room.Room.CmdCh <- domain.Command{
 		Type:     "connect",
 		PlayerID: playerID,
-		Conn:     conn,
+		Conn:     realConn,
 	}
 
 	// 4️⃣ 启动 WS 读循环（每个连接一个 goroutine）
-	go readLoop(conn, room.Room, playerID)
+	go readLoop(realConn.Conn, room.Room, playerID)
 }

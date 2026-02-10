@@ -63,8 +63,6 @@ func startDelayedDelete(r *domain.Room) {
 				return
 			}
 		}
-
-		// 真的删
 		delete(Rooms, r.ID)
 		log.Printf("房间 %s 已被延迟删除\n", r.ID)
 	})
@@ -103,6 +101,11 @@ func MarkPlayerOffline(r *domain.Room, playerID string) (roomDeleted bool) {
 		p, ok := r.Players[playerID]
 		if !ok {
 			return
+		}
+
+		// 关闭连接，停止心跳
+		if p.Conn != nil {
+			p.Conn.Close()
 		}
 
 		p.Online = false
@@ -218,6 +221,10 @@ func handleConnectCommand(r *domain.Room, cmd domain.Command) {
 	if p, ok := r.Players[playerID]; ok {
 		log.Printf("玩家 %s 尝试加入房间 %s，当前状态：%v\n", playerID, r.ID, p.Online)
 		if !p.Online {
+			// 检查是否是真实连接
+			if realConn, ok := conn.(*dto.RealConn); ok {
+				realConn.StartHeartbeat()
+			}
 			p.Conn = conn
 			p.Online = true
 			log.Printf("玩家 %s 重连成功\n", playerID)
@@ -247,6 +254,11 @@ func handleConnectCommand(r *domain.Room, cmd domain.Command) {
 	}
 
 	// 4️⃣ 新玩家加入
+	// 检查是否是真实连接
+	if realConn, ok := conn.(*dto.RealConn); ok {
+		realConn.StartHeartbeat()
+	}
+
 	r.Players[playerID] = &dto.PlayerConn{
 		PlayerID: playerID,
 		Conn:     conn,

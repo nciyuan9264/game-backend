@@ -1,6 +1,10 @@
 package dto
 
-import "github.com/gorilla/websocket"
+import (
+	"time"
+
+	"github.com/gorilla/websocket"
+)
 
 type RoomStatus string
 
@@ -8,8 +12,12 @@ type ConnInterface interface {
 	WriteMessage(messageType int, data []byte) error
 	Close() error
 }
+
 type RealConn struct {
 	*websocket.Conn
+	PingInterval time.Duration
+	LastPongTime time.Time
+	Done         chan struct{}
 }
 
 func (r *RealConn) WriteMessage(messageType int, data []byte) error {
@@ -17,7 +25,42 @@ func (r *RealConn) WriteMessage(messageType int, data []byte) error {
 }
 
 func (r *RealConn) Close() error {
+	close(r.Done)
 	return r.Conn.Close()
+}
+
+func NewRealConn(conn *websocket.Conn) *RealConn {
+	return &RealConn{
+		Conn:         conn,
+		PingInterval: 30 * time.Second,
+		LastPongTime: time.Now(),
+		Done:         make(chan struct{}),
+	}
+}
+
+func (r *RealConn) StartHeartbeat() {
+	go func() {
+		ticker := time.NewTicker(r.PingInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				if time.Since(r.LastPongTime) > r.PingInterval*2 {
+					r.Close()
+					return
+				}
+				r.WriteMessage(websocket.PingMessage, []byte{})
+			case <-r.Done:
+				return
+			}
+		}
+	}()
+
+	r.Conn.SetPongHandler(func(string) error {
+		r.LastPongTime = time.Now()
+		return nil
+	})
 }
 
 // 玩家连接对象结构体
