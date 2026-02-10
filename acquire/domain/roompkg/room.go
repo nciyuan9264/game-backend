@@ -558,15 +558,17 @@ func HandleReadyMessage(r *domain.Room, cmd domain.Command) {
 			}
 		}
 		// 更新房间状态为匹配中
-		err = SetRoomStatusCache(r.ID, dto.RoomStatusSetTile)
-		if err != nil {
-			log.Printf("❌ 内存设置房间状态失败: %v\n", err)
-			return
-		}
-		err = data.SetGameStatus(repository.Rdb, r.ID, dto.RoomStatusSetTile)
-		if err != nil {
-			log.Printf("❌ redis设置游戏状态失败: %v\n", err)
-			return
+		if roomInfo.GameStatus == dto.RoomStatusWaiting {
+			err = SetRoomStatusCache(r.ID, dto.RoomStatusSetTile)
+			if err != nil {
+				log.Printf("❌ 内存设置房间状态失败: %v\n", err)
+				return
+			}
+			err = data.SetGameStatus(repository.Rdb, r.ID, dto.RoomStatusSetTile)
+			if err != nil {
+				log.Printf("❌ redis设置游戏状态失败: %v\n", err)
+				return
+			}
 		}
 	}
 }

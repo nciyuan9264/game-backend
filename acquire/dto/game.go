@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"log"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -51,6 +52,7 @@ func (r *RealConn) StartHeartbeat() {
 					return
 				}
 				r.WriteMessage(websocket.PingMessage, []byte{})
+				log.Println("✅ 发送心跳包")
 			case <-r.Done:
 				return
 			}
