@@ -3,6 +3,8 @@ package domain
 import (
 	"encoding/json"
 	"go-game/dto"
+	"sync"
+	"time"
 )
 
 // 持续监听客户端消息，并将其广播给房间内其他玩家
@@ -32,4 +34,7 @@ type Room struct {
 	PlayerSeq []string                   `json:"playerSeq"`
 	CmdCh     chan Command               `json:"-"`
 	QuitCh    chan struct{}              `json:"-"`
+
+	DeleteTimer *time.Timer `json:"-"`
+	RoomLock    sync.Mutex  `json:"-"`
 }

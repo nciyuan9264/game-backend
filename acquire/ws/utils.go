@@ -20,16 +20,3 @@ func upgradeConnection(c *gin.Context) (*websocket.Conn, error) {
 	}
 	return conn, err
 }
-
-// GetConn 用于根据 roomID 和 playerID 获取对应的 WebSocket 连接
-// func GetConn(roomID string, playerID string) (dto.ConnInterface, error) {
-// 	players := room.Rooms[roomID].Players
-// 	var conn dto.ConnInterface
-// 	for _, p := range players {
-// 		if p.PlayerID == playerID {
-// 			conn = p.Conn
-// 			break
-// 		}
-// 	}
-// 	return conn, nil
-// }

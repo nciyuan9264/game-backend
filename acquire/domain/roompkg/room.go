@@ -43,6 +43,33 @@ const MaxPlayers = 6
 var Rooms = map[string]*RoomService{}
 var RoomLock sync.Mutex
 
+func startDelayedDelete(r *domain.Room) {
+	// 防止重复启动定时器
+	if r.DeleteTimer != nil {
+		return
+	}
+
+	log.Printf("房间 %s 进入 10 秒延迟删除状态\n", r.ID)
+
+	r.DeleteTimer = time.AfterFunc(10*time.Second, func() {
+		r.RoomLock.Lock()
+		defer r.RoomLock.Unlock()
+
+		// 再次确认：是否仍然没有在线真人
+		for _, p := range r.Players {
+			if !p.AI && p.Online {
+				log.Printf("房间 %s 有玩家重连，取消删除\n", r.ID)
+				r.DeleteTimer = nil
+				return
+			}
+		}
+
+		// 真的删
+		delete(Rooms, r.ID)
+		log.Printf("房间 %s 已被延迟删除\n", r.ID)
+	})
+}
+
 func transferOwnerOrDelete(r *domain.Room) bool {
 	for _, p := range r.Players {
 		if !p.AI && p.Online {
@@ -52,7 +79,7 @@ func transferOwnerOrDelete(r *domain.Room) bool {
 	}
 
 	// 没有在线真人了
-	delete(Rooms, r.ID)
+	startDelayedDelete(r)
 	return true
 }
 
