@@ -74,6 +74,7 @@ func transferOwnerOrDelete(r *domain.Room) bool {
 	for _, p := range r.Players {
 		if !p.AI && p.Online {
 			r.OwnerID = p.PlayerID
+			p.Ready = true
 			return false
 		}
 	}
