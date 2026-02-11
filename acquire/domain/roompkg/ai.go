@@ -7,7 +7,6 @@ import (
 	"go-game/dto"
 	"go-game/repository"
 	"go-game/utils"
-	"log"
 	"sort"
 	"strings"
 	"time"
@@ -23,7 +22,7 @@ func chooseTileForAI(roomID, playerID string) string {
 
 	allTiles, err := data.GetAllRoomTiles(repository.Rdb, roomID)
 	if err != nil {
-		log.Println("❌ 获取所有房间瓦片失败:", err)
+		utils.Error("获取所有房间瓦片失败", utils.F("room_id", roomID), utils.F("error", err))
 		return ""
 	}
 
@@ -48,7 +47,7 @@ func shouldCreateCompany(roomID, playerID string) bool {
 func chooseCompanyForAI(roomID string) string {
 	companyInfo, err := data.GetCompanyInfo(repository.Rdb, roomID)
 	if err != nil {
-		log.Println("❌ 获取公司信息失败:", err)
+		utils.Error("获取公司信息失败", utils.F("room_id", roomID), utils.F("error", err))
 		return ""
 	}
 	// 过滤掉已创建的公司
@@ -87,19 +86,19 @@ func chooseCompanyForAI(roomID string) string {
 func chooseStocksToBuyForAI(roomID, playerID string) map[string]int {
 	companyInfo, err := data.GetCompanyInfo(repository.Rdb, roomID)
 	if err != nil {
-		log.Println("❌ 获取公司信息失败:", err)
+		utils.Error("获取公司信息失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
 		return nil
 	}
 	playerInfo, err := data.GetPlayerInfoField(repository.Rdb, repository.Ctx, roomID, playerID, "money")
 	if err != nil {
-		log.Println("❌ 获取玩家信息失败:", err)
+		utils.Error("获取玩家信息失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
 		return nil
 	}
 	money := playerInfo.Money
 
 	playerStock, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, playerID)
 	if err != nil {
-		log.Println("❌ 获取玩家股票失败:", err)
+		utils.Error("获取玩家股票失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
 		return nil
 	}
 
@@ -173,25 +172,25 @@ func IsAIPlayer(playerID string) bool {
 func chooseMergingSettleForAI(roomID, playerID string) []dto.MergingSettleItem {
 	playerData, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, playerID)
 	if err != nil {
-		log.Println("❌ 获取玩家股票信息失败:", err)
+		utils.Error("获取玩家股票信息失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
 		return nil
 	}
 
 	mergeSettleData, err := data.GetMergeSettleData(repository.Ctx, repository.Rdb, roomID)
 	if err != nil {
-		log.Printf("❌ 获取合并数据失败: %v\n", err)
+		utils.Error("获取合并数据失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
 		return nil
 	}
 
 	mainCompany, err := data.GetMergeMainCompany(repository.Rdb, repository.Ctx, roomID)
 	if err != nil {
-		log.Println("❌ 获取合并主公司失败:", err)
+		utils.Error("获取合并主公司失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
 		return nil
 	}
 
 	companyInfo, err := data.GetCompanyInfo(repository.Rdb, roomID)
 	if err != nil {
-		log.Println("❌ 获取公司信息失败:", err)
+		utils.Error("获取公司信息失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
 		return nil
 	}
 
@@ -236,13 +235,13 @@ func chooseMergingSettleForAI(roomID, playerID string) []dto.MergingSettleItem {
 func chooseMergingSelectionForAI(roomID, playerID string, mainCompany []string) string {
 	companyInfo, err := data.GetCompanyInfo(repository.Rdb, roomID)
 	if err != nil {
-		log.Println("❌ 获取公司信息失败:", err)
+		utils.Error("获取公司信息失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
 		return ""
 	}
 
 	playerStocks, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, playerID)
 	if err != nil {
-		log.Println("❌ 获取玩家股票信息失败:", err)
+		utils.Error("获取玩家股票信息失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
 		return ""
 	}
 	res := ""
@@ -265,7 +264,7 @@ func chooseMergingSelectionForAI(roomID, playerID string, mainCompany []string) 
 func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 	var msg map[string]interface{}
 	if err := json.Unmarshal(message, &msg); err != nil {
-		log.Println("❌ AI 消息格式错误:", err)
+		utils.Error("AI 消息格式错误", utils.F("room_id", roomID), utils.F("error", err))
 		return false
 	}
 
@@ -304,7 +303,7 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 	// 提取临时数据（合并选择）
 	tempData, ok := msg["tempData"].(map[string]interface{})
 	if !ok {
-		log.Println("❌ tempData 类型错误")
+		utils.Error("tempData 类型错误", utils.F("room_id", roomID))
 		return false
 	}
 
@@ -326,7 +325,7 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 	if gameStatus == dto.RoomStatusMergingSettle {
 		mergeSettleData, err := data.GetMergeSettleData(repository.Ctx, repository.Rdb, roomID)
 		if err != nil {
-			log.Printf("❌ 获取合并数据失败: %v\n", err)
+			utils.Error("获取合并数据失败", utils.F("room_id", roomID), utils.F("player_id", playerId), utils.F("error", err))
 			return false
 		}
 
@@ -342,14 +341,14 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 			}
 		}
 		if !playerInHoder {
-			log.Println("❌ 外层校验玩家不在任何合并中")
+			utils.Error("外层校验玩家不在任何合并中", utils.F("room_id", roomID), utils.F("player_id", playerId))
 			return false
 		}
 	}
 
 	allTile, err := data.GetAllRoomTiles(repository.Rdb, roomID)
 	if err != nil {
-		log.Println("❌ 获取所有 tile 失败:", err)
+		utils.Error("获取所有 tile 失败", utils.F("room_id", roomID), utils.F("player_id", playerId), utils.F("error", err))
 		return false
 	}
 	isAllTileUsed := true
@@ -359,12 +358,12 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 		}
 	}
 	if isAllTileUsed {
-		log.Println("❌ 所有 tile 已被使用")
+		utils.Error("所有 tile 已被使用", utils.F("room_id", roomID), utils.F("player_id", playerId))
 		// time.Sleep(3 * time.Second)
 		// SetGameStatus(repository.Rdb, roomID, dto.RoomStatusEnd)
 	}
 
-	log.Printf("🤖 当前是 AI 玩家 %s 的回合，状态为 %s，准备延迟执行 AI 行动...", playerId, gameStatus)
+	utils.Info("当前是 AI 玩家的回合，准备延迟执行 AI 行动", utils.F("room_id", roomID), utils.F("player_id", playerId), utils.F("game_status", gameStatus))
 
 	// ---------- 在协程中延迟执行 ----------
 	go func() {
@@ -377,10 +376,10 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 		case "setTile":
 			tile := chooseTileForAI(roomID, currentPlayerID)
 			if tile == "" {
-				log.Println("🤖 AI 未选择有效 tile")
+				utils.Error("AI 未选择有效 tile", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID))
 				return
 			}
-			log.Printf("🤖 AI 选择 tile: %s", tile)
+			utils.Info("AI 选择 tile", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID), utils.F("tile", tile))
 			aiMsg = map[string]interface{}{
 				"type":    "game_place_tile",
 				"payload": map[string]interface{}{"tileKey": tile},
@@ -388,37 +387,42 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 		case "createCompany":
 			company := chooseCompanyForAI(roomID)
 			if company == "" {
-				log.Println("🤖 AI 未选择有效公司")
+				utils.Error("AI 未选择有效公司", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID))
 				return
 			}
+			utils.Info("AI 选择公司", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID), utils.F("company", company))
 			aiMsg = map[string]interface{}{
 				"type":    "game_create_company",
 				"payload": map[string]interface{}{"company": company},
 			}
 		case "buyStock":
 			stocks := chooseStocksToBuyForAI(roomID, currentPlayerID)
+			utils.Info("AI 选择购买股票", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID), utils.F("stocks", stocks))
 			aiMsg = map[string]interface{}{
 				"type":    "game_buy_stock",
 				"payload": map[string]interface{}{"stocks": stocks},
 			}
 		case "mergingSelection":
 			selection := chooseMergingSelectionForAI(roomID, currentPlayerID, mainCompany)
+			utils.Info("AI 选择合并公司", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID), utils.F("selection", selection))
 			aiMsg = map[string]interface{}{
 				"type":    "game_merging_selection",
 				"payload": map[string]interface{}{"mainCompany": selection},
 			}
 		case "mergingSettle":
 			settle := chooseMergingSettleForAI(roomID, playerId)
+			utils.Info("AI 选择合并结算", utils.F("room_id", roomID), utils.F("player_id", playerId), utils.F("settle", settle))
 			aiMsg = map[string]interface{}{
 				"type":    "game_merging_settle",
 				"payload": map[string]interface{}{"actions": settle},
 			}
 		case "end":
+			utils.Info("AI 选择重新开始游戏", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID))
 			aiMsg = map[string]interface{}{
 				"type": "game_restart_game",
 			}
 		default:
-			log.Printf("⚠️ 当前状态 %s 未定义 AI 行为", gameStatus)
+			utils.Warn("当前状态未定义 AI 行为", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID), utils.F("game_status", gameStatus))
 			return
 		}
 
@@ -426,10 +430,10 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 		// 将 AI 消息转换为 Command 格式，和玩家一样通过通道传递
 		payload, err := json.Marshal(aiMsg["payload"])
 		if err != nil {
-			log.Printf("❌ AI 消息序列化失败: %v", err)
+			utils.Error("AI 消息序列化失败", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID), utils.F("error", err))
 			return
 		}
-		log.Printf("🤖 AI 发送消息: %s", string(payload))
+		utils.Info("AI 发送消息", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID), utils.F("message", string(payload)))
 
 		// 向房间的命令通道发送消息，和玩家一样的处理方式
 		Rooms[roomID].Room.CmdCh <- domain.Command{
@@ -439,7 +443,7 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 			Conn:     conn,
 		}
 
-		log.Printf("🤖 AI [%s] 发送命令: %s", playerId, aiMsg["type"])
+		utils.Info("AI 发送命令", utils.F("room_id", roomID), utils.F("player_id", playerId), utils.F("command_type", aiMsg["type"]))
 	}()
 
 	return true
