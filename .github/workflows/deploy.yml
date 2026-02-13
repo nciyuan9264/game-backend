@@ -30,6 +30,7 @@ jobs:
       # 构建 acquire 镜像
       - name: Build acquire docker image
         run: |
+          export DOCKER_BUILDKIT=0
           docker build -t ${{ secrets.SWR_ENDPOINT }}/gamebus/acquire:latest \
                        -t ${{ secrets.SWR_ENDPOINT }}/gamebus/acquire:${{ steps.vars.outputs.IMAGE_TAG }} \
                        ./acquire
