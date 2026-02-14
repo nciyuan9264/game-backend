@@ -2,6 +2,7 @@ package dto
 
 import (
 	"log"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -19,6 +20,7 @@ type RealConn struct {
 	PingInterval time.Duration
 	LastPongTime time.Time
 	Done         chan struct{}
+	closeOnce    sync.Once
 }
 
 func (r *RealConn) WriteMessage(messageType int, data []byte) error {
@@ -26,8 +28,11 @@ func (r *RealConn) WriteMessage(messageType int, data []byte) error {
 }
 
 func (r *RealConn) Close() error {
-	close(r.Done)
-	return r.Conn.Close()
+	r.closeOnce.Do(func() {
+		close(r.Done)
+		r.Conn.Close()
+	})
+	return nil
 }
 
 func NewRealConn(conn *websocket.Conn) *RealConn {

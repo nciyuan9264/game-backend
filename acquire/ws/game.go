@@ -34,8 +34,8 @@ func readLoop(conn *websocket.Conn, room *domain.Room, playerID string) {
 		// WS → Command
 		room.CmdCh <- domain.Command{
 			Type:     msg.Type,
-			PlayerID: playerID,
 			Payload:  msg.Payload,
+			PlayerID: playerID,
 			Conn:     conn,
 		}
 	}
@@ -61,7 +61,7 @@ func HandleWebSocket(c *gin.Context) {
 	// 2️⃣ 拿房间（只读，不改）
 	room := roompkg.Rooms[roomID]
 	if room == nil {
-		realConn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"ROOM_NOT_FOUND"}`))
+		realConn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"房间不存在"}`))
 		realConn.Close()
 		return
 	}

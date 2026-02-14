@@ -14,8 +14,9 @@ import (
 	"go-game/utils"
 	"sync"
 
+	"math/rand/v2"
+
 	"github.com/gorilla/websocket"
-	"golang.org/x/exp/rand"
 )
 
 type RoomService struct {
@@ -43,14 +44,52 @@ const MaxPlayers = 6
 var Rooms = map[string]*RoomService{}
 var RoomLock sync.Mutex
 
+// handleCommand 处理房间命令
+func (r *RoomService) handleCommand(cmd domain.Command) {
+	switch cmd.Type {
+	case "connect":
+		handleConnectCommand(r.Room, cmd)
+	case "disconnect":
+		handleDisconnectCommand(r.Room, cmd)
+	case "match_ready":
+		HandleMatchReady(r.Room, cmd)
+	case "match_begin":
+		HandleMatchBegin(r.Room, cmd)
+	case "match_add_ai":
+		HandleAddAI(r.Room, cmd)
+	case "match_remove_player":
+		HandleRemovePlayer(r.Room, cmd)
+	case "game_ready":
+		HandleReadyMessage(r.Room, cmd)
+	case "game_place_tile":
+		game.HandlePlaceTileMessage(r.Room, cmd)
+	case "game_create_company":
+		game.HandleCreateCompanyMessage(r.Room, cmd)
+	case "game_merging_settle":
+		game.HandleMergingSettleMessage(r.Room, cmd)
+	case "game_buy_stock":
+		game.HandleBuyStockMessage(r.Room, cmd)
+	case "game_merging_selection":
+		game.HandleMergingSelectionMessage(r.Room, cmd)
+	// case "game_end":
+	// 	game.HandleGameEndMessage(r.Room, cmd)
+	case "game_play_audio":
+		game.HandlePlayAudioMessage(r.Room, cmd)
+	case "game_restart":
+		game.HandleRestartGameMessage(r.Room, cmd)
+	case "game_restart_game":
+		game.HandleRestartGameMessage(r.Room, cmd)
+	default:
+		utils.Warn("未知命令类型", utils.F("command_type", cmd.Type))
+	}
+}
+
 func startDelayedDelete(r *domain.Room) {
 	// 防止重复启动定时器
 	if r.DeleteTimer != nil {
 		return
 	}
-
-	utils.Info("房间进入 10 秒延迟删除状态", utils.F("room_id", r.ID))
-
+	utils.Info("房间10s后将被删除", utils.F("room_id", r.ID))
 	r.DeleteTimer = time.AfterFunc(10*time.Second, func() {
 		r.RoomLock.Lock()
 		defer r.RoomLock.Unlock()
@@ -73,18 +112,20 @@ func transferOwnerOrDelete(r *domain.Room) bool {
 		if !p.AI && p.Online {
 			r.OwnerID = p.PlayerID
 			p.Ready = true
+			utils.Info("房主已变更", utils.F("room_id", r.ID), utils.F("player_id", p.PlayerID))
 			return false
 		}
 	}
 
-	// 没有在线真人了
-	startDelayedDelete(r)
-	return true
+	if r.Status == dto.RoomStatusMatch {
+		// 没有在线真人了
+		startDelayedDelete(r)
+		return true
+	}
+	return false
 }
 
 func MarkPlayerOffline(r *domain.Room, playerID string) (roomDeleted bool) {
-	var ownerLeft bool
-
 	if r.Status == dto.RoomStatusMatch {
 		for i, pID := range r.PlayerSeq {
 			if pID == playerID {
@@ -142,33 +183,14 @@ func MarkPlayerOffline(r *domain.Room, playerID string) (roomDeleted bool) {
 				}
 			})
 		}
-
-		utils.Info("玩家标记为离线", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 	}
 
 	if playerID == r.OwnerID {
-		ownerLeft = true
-	}
-	utils.Info("玩家是否是房主", utils.F("room_id", r.ID), utils.F("player_id", playerID), utils.F("is_owner", ownerLeft))
-	if ownerLeft {
 		return transferOwnerOrDelete(r)
 	}
 
 	return false
 }
-
-// func handleOwnerLeave(r *roompkg.Room) {
-// 	// 找第一个非 AI 玩家
-// 	for _, p := range r.Players {
-// 		if !p.AI {
-// 			r.OwnerID = p.PlayerID
-// 			return
-// 		}
-// 	}
-
-// 	// 没有真人了 → 删除房间
-// 	delete(room.Rooms, r.ID)
-// }
 
 // 玩家断开连接后，从房间中移除该连接
 func handleDisconnectCommand(r *domain.Room, cmd domain.Command) {
@@ -184,6 +206,7 @@ func handleDisconnectCommand(r *domain.Room, cmd domain.Command) {
 			data.SetRoomStatus(repository.Rdb, r.ID, false)
 		}
 	}
+	utils.Info("玩家已从房间中移除", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID))
 }
 
 // 获取房间中玩家数量
@@ -197,56 +220,6 @@ func getRoomPlayerCount(room *domain.Room) int {
 	return onLineCount
 }
 
-func SetRoomStatusCache(roomID string, status dto.RoomStatus) error {
-	// 1️⃣ 更新内存状态（权威）
-	r, ok := Rooms[roomID]
-	if !ok {
-		return fmt.Errorf("room not found in memory: %s", roomID)
-	}
-	r.Room.Status = status
-	return nil
-}
-
-// handleCommand 处理房间命令
-func (r *RoomService) handleCommand(cmd domain.Command) {
-	switch cmd.Type {
-	case "connect":
-		handleConnectCommand(r.Room, cmd)
-	case "disconnect":
-		handleDisconnectCommand(r.Room, cmd)
-	case "match_ready":
-		HandleMatchReady(r.Room, cmd)
-	case "match_begin":
-		HandleMatchBegin(r.Room, cmd)
-	case "match_add_ai":
-		HandleAddAI(r.Room, cmd)
-	case "match_remove_player":
-		HandleRemovePlayer(r.Room, cmd)
-	case "game_ready":
-		HandleReadyMessage(r.Room, cmd)
-	case "game_place_tile":
-		game.HandlePlaceTileMessage(r.Room, cmd)
-	case "game_create_company":
-		game.HandleCreateCompanyMessage(r.Room, cmd)
-	case "game_merging_settle":
-		game.HandleMergingSettleMessage(r.Room, cmd)
-	case "game_buy_stock":
-		game.HandleBuyStockMessage(r.Room, cmd)
-	case "game_merging_selection":
-		game.HandleMergingSelectionMessage(r.Room, cmd)
-	// case "game_end":
-	// 	game.HandleGameEndMessage(r.Room, cmd)
-	case "game_play_audio":
-		game.HandlePlayAudioMessage(r.Room, cmd)
-	case "game_restart":
-		game.HandleRestartGameMessage(r.Room, cmd)
-	case "game_restart_game":
-		game.HandleRestartGameMessage(r.Room, cmd)
-	default:
-		utils.Warn("未知命令类型", utils.F("command_type", cmd.Type))
-	}
-}
-
 // handleConnectCommand 处理玩家加入命令
 func handleConnectCommand(r *domain.Room, cmd domain.Command) {
 	playerID := cmd.PlayerID
@@ -254,7 +227,7 @@ func handleConnectCommand(r *domain.Room, cmd domain.Command) {
 
 	// 1️⃣ 已存在玩家（重连 or 重复）
 	if p, ok := r.Players[playerID]; ok {
-		utils.Info("玩家尝试加入房间", utils.F("room_id", r.ID), utils.F("player_id", playerID), utils.F("current_status", p.Online))
+		utils.Info("玩家尝试加入房间（已存在玩家）", utils.F("room_id", r.ID), utils.F("player_id", playerID), utils.F("current_status", p.Online))
 		if !p.Online || p.AI {
 			// 检查是否是真实连接
 			if realConn, ok := conn.(*dto.RealConn); ok {
@@ -279,46 +252,45 @@ func handleConnectCommand(r *domain.Room, cmd domain.Command) {
 
 			utils.Info("玩家重连成功", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 			return
+		} else {
+			// 已在线，重复连接
+			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"玩家已在房间内,请从其他设备退出"}`))
+			conn.Close()
+			return
+		}
+	} else {
+		utils.Info("玩家尝试加入房间（新玩家）", utils.F("room_id", r.ID), utils.F("player_id", playerID))
+
+		// 2️⃣ 状态校验
+		if r.Status != dto.RoomStatusMatch {
+			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"游戏已开始，无法加入"}`))
+			conn.Close()
+			return
 		}
 
-		// 已在线，重复连接
-		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"PLAYER_ALREADY_IN_ROOM"}`))
-		conn.Close()
-		return
+		// 3️⃣ 人数校验
+		if len(r.Players) >= MaxPlayers {
+			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"房间已满"}`))
+			conn.Close()
+			return
+		}
+
+		// 检查是否是真实连接
+		if realConn, ok := conn.(*dto.RealConn); ok {
+			realConn.StartHeartbeat()
+		}
+
+		r.Players[playerID] = &dto.PlayerConn{
+			PlayerID: playerID,
+			Conn:     conn,
+			Online:   true,
+			Ready:    r.OwnerID == playerID,
+			AI:       false,
+		}
+		r.PlayerSeq = append(r.PlayerSeq, playerID)
+
+		utils.Info("玩家加入房间", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 	}
-
-	utils.Info("玩家尝试加入房间（新玩家）", utils.F("room_id", r.ID), utils.F("player_id", playerID))
-
-	// 2️⃣ 状态校验
-	if r.Status != dto.RoomStatusMatch {
-		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"游戏已开始，无法加入"}`))
-		conn.Close()
-		return
-	}
-
-	// 3️⃣ 人数校验
-	if len(r.Players) >= MaxPlayers {
-		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"房间已满"}`))
-		conn.Close()
-		return
-	}
-
-	// 4️⃣ 新玩家加入
-	// 检查是否是真实连接
-	if realConn, ok := conn.(*dto.RealConn); ok {
-		realConn.StartHeartbeat()
-	}
-
-	r.Players[playerID] = &dto.PlayerConn{
-		PlayerID: playerID,
-		Conn:     conn,
-		Online:   true,
-		Ready:    r.OwnerID == playerID,
-		AI:       false,
-	}
-	r.PlayerSeq = append(r.PlayerSeq, playerID)
-
-	utils.Info("玩家加入房间", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 }
 
 type ReadyPayload struct {
@@ -459,11 +431,7 @@ func HandleMatchBegin(r *domain.Room, cmd domain.Command) {
 	}
 
 	// 更新房间状态为匹配中
-	err = SetRoomStatusCache(r.ID, dto.RoomStatusWaiting)
-	if err != nil {
-		utils.Error("内存设置房间状态失败", utils.F("room_id", r.ID), utils.F("error", err))
-		return
-	}
+	r.Status = dto.RoomStatusWaiting
 	err = data.SetGameStatus(rdb, r.ID, dto.RoomStatusWaiting)
 	if err != nil {
 		utils.Error("redis设置游戏状态失败", utils.F("room_id", r.ID), utils.F("error", err))
@@ -477,7 +445,7 @@ func HandleMatchBegin(r *domain.Room, cmd domain.Command) {
 func JoinMatchAsAI(r *domain.Room, playerID string) bool {
 	r.Players[playerID] = &dto.PlayerConn{
 		PlayerID: playerID,
-		Conn:     &VirtualConn{PlayerID: playerID, RoomID: r.ID},
+		Conn:     &VirtualConn{Room: r},
 		Online:   true,
 		Ready:    true,
 		AI:       true,
@@ -543,7 +511,7 @@ func ReplacePlayerWithAI(r *domain.Room, playerID string) {
 	// 标记玩家为AI
 	player.AI = true
 	player.Online = true // AI玩家始终在线
-	player.Conn = &VirtualConn{PlayerID: playerID, RoomID: r.ID}
+	player.Conn = &VirtualConn{Room: r}
 	err := data.SetRoomStatus(repository.Rdb, r.ID, true)
 	if err != nil {
 		utils.Error("设置房间状态失败", utils.F("room_id", r.ID), utils.F("error", err))
@@ -628,7 +596,7 @@ func HandleReadyMessage(r *domain.Room, cmd domain.Command) {
 				playerIDs = append(playerIDs, pid)
 			}
 
-			randomPlayerID := playerIDs[rand.Intn(len(playerIDs))]
+			randomPlayerID := playerIDs[rand.IntN(len(playerIDs))]
 			err = data.SetCurrentPlayer(repository.Rdb, repository.Ctx, r.ID, randomPlayerID)
 			if err != nil {
 				utils.Error("设置当前玩家失败", utils.F("room_id", r.ID), utils.F("error", err))
@@ -637,11 +605,7 @@ func HandleReadyMessage(r *domain.Room, cmd domain.Command) {
 		}
 		// 更新房间状态为匹配中
 		if roomInfo.GameStatus == dto.RoomStatusWaiting {
-			err = SetRoomStatusCache(r.ID, dto.RoomStatusSetTile)
-			if err != nil {
-				utils.Error("内存设置房间状态失败", utils.F("room_id", r.ID), utils.F("error", err))
-				return
-			}
+			r.Status = dto.RoomStatusSetTile
 			err = data.SetGameStatus(repository.Rdb, r.ID, dto.RoomStatusSetTile)
 			if err != nil {
 				utils.Error("redis设置游戏状态失败", utils.F("room_id", r.ID), utils.F("error", err))
@@ -649,28 +613,4 @@ func HandleReadyMessage(r *domain.Room, cmd domain.Command) {
 			}
 		}
 	}
-}
-
-// VirtualConn 虚拟连接，用于AI玩家
-type VirtualConn struct {
-	PlayerID string
-	RoomID   string
-}
-
-// WriteMessage 实现ConnInterface接口
-func (v *VirtualConn) WriteMessage(messageType int, data []byte) error {
-	// AI玩家不需要实际写入消息
-	// log.Printf("[AI:%s] 收到消息到房间 %s: %s\n", v.PlayerID, v.RoomID, string(data))
-	MaybeRunAIIfNeeded(v.RoomID, data)
-	return nil
-}
-
-func (v *VirtualConn) ReadMessage() (messageType int, p []byte, err error) {
-	return 0, nil, fmt.Errorf("virtual connection cannot read")
-}
-
-// Close 实现ConnInterface接口
-func (v *VirtualConn) Close() error {
-	// AI玩家不需要实际关闭连接
-	return nil
 }

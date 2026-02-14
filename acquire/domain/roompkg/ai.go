@@ -2,17 +2,37 @@ package roompkg
 
 import (
 	"encoding/json"
+	"fmt"
 	"go-game/domain/data"
 	"go-game/domain/domain"
 	"go-game/dto"
 	"go-game/repository"
 	"go-game/utils"
 	"sort"
-	"strings"
 	"time"
 
-	"golang.org/x/exp/rand"
+	"math/rand/v2"
 )
+
+type VirtualConn struct {
+	Room *domain.Room
+}
+
+// WriteMessage 实现ConnInterface接口
+func (v *VirtualConn) WriteMessage(messageType int, data []byte) error {
+	MaybeRunAIIfNeeded(v.Room, data)
+	return nil
+}
+
+func (v *VirtualConn) ReadMessage() (messageType int, p []byte, err error) {
+	return 0, nil, fmt.Errorf("virtual connection cannot read")
+}
+
+// Close 实现ConnInterface接口
+func (v *VirtualConn) Close() error {
+	// AI玩家不需要实际关闭连接
+	return nil
+}
 
 func chooseTileForAI(roomID, playerID string) string {
 	tiles, err := data.GetPlayerTiles(repository.Rdb, repository.Ctx, roomID, playerID)
@@ -36,12 +56,7 @@ func chooseTileForAI(roomID, playerID string) string {
 		}
 	}
 
-	return tiles[rand.Intn(len(tiles))]
-}
-
-func shouldCreateCompany(roomID, playerID string) bool {
-	// 你可以根据 redis 状态判断：该 tile 旁边没有现有公司 && 有未创建公司
-	return true // 示例：这里直接返回 true
+	return tiles[rand.IntN(len(tiles))]
 }
 
 func chooseCompanyForAI(roomID string) string {
@@ -75,12 +90,12 @@ func chooseCompanyForAI(roomID string) string {
 
 	// 从高优先级到低依次尝试选择
 	if len(p1) > 0 {
-		return p1[rand.Intn(len(p1))]
+		return p1[rand.IntN(len(p1))]
 	}
 	if len(p2) > 0 {
-		return p2[rand.Intn(len(p2))]
+		return p2[rand.IntN(len(p2))]
 	}
-	return p3[rand.Intn(len(p3))]
+	return p3[rand.IntN(len(p3))]
 }
 
 func chooseStocksToBuyForAI(roomID, playerID string) map[string]int {
@@ -146,27 +161,6 @@ func chooseStocksToBuyForAI(roomID, playerID string) map[string]int {
 	}
 
 	return result
-}
-
-func min(a, b, c int) int {
-	if a <= b && a <= c {
-		return a
-	}
-	if b <= c {
-		return b
-	}
-	return c
-}
-
-func min2(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func IsAIPlayer(playerID string) bool {
-	return strings.HasPrefix(playerID, "ai_") // 简单策略，也可以是数据库字段
 }
 
 func chooseMergingSettleForAI(roomID, playerID string) []dto.MergingSettleItem {
@@ -261,10 +255,10 @@ func chooseMergingSelectionForAI(roomID, playerID string, mainCompany []string) 
 	return res
 }
 
-func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
+func MaybeRunAIIfNeeded(room *domain.Room, message []byte) bool {
 	var msg map[string]interface{}
 	if err := json.Unmarshal(message, &msg); err != nil {
-		utils.Error("AI 消息格式错误", utils.F("room_id", roomID), utils.F("error", err))
+		utils.Error("AI 消息格式错误", utils.F("room_id", room.ID), utils.F("error", err))
 		return false
 	}
 
@@ -294,21 +288,13 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 	if !ok || playerId == "" || (playerId != currentPlayerID && gameStatus != dto.RoomStatusMergingSettle) {
 		return false
 	}
-	// 判断是否是 AI 玩家 - 检查两种情况：
-	// 1. 玩家ID以 "ai_" 开头（原始AI玩家）
-	// 2. 或者在房间的玩家列表中，该玩家被标记为AI
-	isAI := IsAIPlayer(currentPlayerID)
-	if !isAI && gameStatus != dto.RoomStatusMergingSettle {
-		// 检查房间内存中的玩家状态
-		roomService, roomExists := Rooms[roomID]
-		if roomExists {
-			utils.Info("当前玩家 %s 尝试运行 AI", utils.F("player_id", currentPlayerID))
-			player, playerExists := roomService.Room.Players[currentPlayerID]
-			utils.Info("当前玩家 %s 存在于房间中", utils.F("player_id", currentPlayerID), utils.F("playerExists", playerExists))
-			if playerExists && player.AI {
-				isAI = true
-				utils.Info("检测到被替换为AI的玩家", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID))
-			}
+	// 判断是否是 AI 玩家
+	if gameStatus != dto.RoomStatusMergingSettle {
+		isAI := false
+
+		if room.Players[currentPlayerID].AI {
+			isAI = true
+			utils.Info("检测到被替换为AI的玩家", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID))
 		}
 
 		utils.Info("当前玩家 %s 不是 AI 玩家", utils.F("player_id", currentPlayerID))
@@ -321,7 +307,7 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 	// 提取临时数据（合并选择）
 	tempData, ok := msg["tempData"].(map[string]interface{})
 	if !ok {
-		utils.Error("tempData 类型错误", utils.F("room_id", roomID))
+		utils.Error("tempData 类型错误", utils.F("room_id", room.ID))
 		return false
 	}
 
@@ -341,9 +327,9 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 
 	// mergingSettle 特殊校验
 	if gameStatus == dto.RoomStatusMergingSettle {
-		mergeSettleData, err := data.GetMergeSettleData(repository.Ctx, repository.Rdb, roomID)
+		mergeSettleData, err := data.GetMergeSettleData(repository.Ctx, repository.Rdb, room.ID)
 		if err != nil {
-			utils.Error("获取合并数据失败", utils.F("room_id", roomID), utils.F("player_id", playerId), utils.F("error", err))
+			utils.Error("获取合并数据失败", utils.F("room_id", room.ID), utils.F("player_id", playerId), utils.F("error", err))
 			return false
 		}
 
@@ -359,14 +345,14 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 			}
 		}
 		if !playerInHoder {
-			utils.Error("外层校验玩家不在任何合并中", utils.F("room_id", roomID), utils.F("player_id", playerId))
+			utils.Error("外层校验玩家不在任何合并中", utils.F("room_id", room.ID), utils.F("player_id", playerId))
 			return false
 		}
 	}
 
-	allTile, err := data.GetAllRoomTiles(repository.Rdb, roomID)
+	allTile, err := data.GetAllRoomTiles(repository.Rdb, room.ID)
 	if err != nil {
-		utils.Error("获取所有 tile 失败", utils.F("room_id", roomID), utils.F("player_id", playerId), utils.F("error", err))
+		utils.Error("获取所有 tile 失败", utils.F("room_id", room.ID), utils.F("player_id", playerId), utils.F("error", err))
 		return false
 	}
 	isAllTileUsed := true
@@ -376,71 +362,71 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 		}
 	}
 	if isAllTileUsed {
-		utils.Error("所有 tile 已被使用", utils.F("room_id", roomID), utils.F("player_id", playerId))
+		utils.Error("所有 tile 已被使用", utils.F("room_id", room.ID), utils.F("player_id", playerId))
 		// time.Sleep(3 * time.Second)
 		// SetGameStatus(repository.Rdb, roomID, dto.RoomStatusEnd)
 	}
 
-	utils.Info("当前是 AI 玩家的回合，准备延迟执行 AI 行动", utils.F("room_id", roomID), utils.F("player_id", playerId), utils.F("game_status", gameStatus))
+	utils.Info("当前是 AI 玩家的回合，准备延迟执行 AI 行动", utils.F("room_id", room.ID), utils.F("player_id", playerId), utils.F("game_status", gameStatus))
 
 	// ---------- 在协程中延迟执行 ----------
 	go func() {
 		time.Sleep(5 * time.Second)
 
-		conn := &VirtualConn{PlayerID: currentPlayerID, RoomID: roomID}
+		conn := &VirtualConn{Room: room}
 		var aiMsg map[string]interface{}
 
 		switch gameStatus {
 		case "setTile":
-			tile := chooseTileForAI(roomID, currentPlayerID)
+			tile := chooseTileForAI(room.ID, currentPlayerID)
 			if tile == "" {
-				utils.Error("AI 未选择有效 tile", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID))
+				utils.Error("AI 未选择有效 tile", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID))
 				return
 			}
-			utils.Info("AI 选择 tile", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID), utils.F("tile", tile))
+			utils.Info("AI 选择 tile", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID), utils.F("tile", tile))
 			aiMsg = map[string]interface{}{
 				"type":    "game_place_tile",
 				"payload": map[string]interface{}{"tileKey": tile},
 			}
 		case "createCompany":
-			company := chooseCompanyForAI(roomID)
+			company := chooseCompanyForAI(room.ID)
 			if company == "" {
-				utils.Error("AI 未选择有效公司", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID))
+				utils.Error("AI 未选择有效公司", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID))
 				return
 			}
-			utils.Info("AI 选择公司", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID), utils.F("company", company))
+			utils.Info("AI 选择公司", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID), utils.F("company", company))
 			aiMsg = map[string]interface{}{
 				"type":    "game_create_company",
 				"payload": map[string]interface{}{"company": company},
 			}
 		case "buyStock":
-			stocks := chooseStocksToBuyForAI(roomID, currentPlayerID)
-			utils.Info("AI 选择购买股票", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID), utils.F("stocks", stocks))
+			stocks := chooseStocksToBuyForAI(room.ID, currentPlayerID)
+			utils.Info("AI 选择购买股票", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID), utils.F("stocks", stocks))
 			aiMsg = map[string]interface{}{
 				"type":    "game_buy_stock",
 				"payload": map[string]interface{}{"stocks": stocks},
 			}
 		case "mergingSelection":
-			selection := chooseMergingSelectionForAI(roomID, currentPlayerID, mainCompany)
-			utils.Info("AI 选择合并公司", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID), utils.F("selection", selection))
+			selection := chooseMergingSelectionForAI(room.ID, currentPlayerID, mainCompany)
+			utils.Info("AI 选择合并公司", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID), utils.F("selection", selection))
 			aiMsg = map[string]interface{}{
 				"type":    "game_merging_selection",
 				"payload": map[string]interface{}{"mainCompany": selection},
 			}
 		case "mergingSettle":
-			settle := chooseMergingSettleForAI(roomID, playerId)
-			utils.Info("AI 选择合并结算", utils.F("room_id", roomID), utils.F("player_id", playerId), utils.F("settle", settle))
+			settle := chooseMergingSettleForAI(room.ID, playerId)
+			utils.Info("AI 选择合并结算", utils.F("room_id", room.ID), utils.F("player_id", playerId), utils.F("settle", settle))
 			aiMsg = map[string]interface{}{
 				"type":    "game_merging_settle",
 				"payload": map[string]interface{}{"actions": settle},
 			}
 		case "end":
-			utils.Info("AI 选择重新开始游戏", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID))
+			utils.Info("AI 选择重新开始游戏", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID))
 			aiMsg = map[string]interface{}{
 				"type": "game_restart_game",
 			}
 		default:
-			utils.Warn("当前状态未定义 AI 行为", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID), utils.F("game_status", gameStatus))
+			utils.Warn("当前状态未定义 AI 行为", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID), utils.F("game_status", gameStatus))
 			return
 		}
 
@@ -448,20 +434,20 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 		// 将 AI 消息转换为 Command 格式，和玩家一样通过通道传递
 		payload, err := json.Marshal(aiMsg["payload"])
 		if err != nil {
-			utils.Error("AI 消息序列化失败", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID), utils.F("error", err))
+			utils.Error("AI 消息序列化失败", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID), utils.F("error", err))
 			return
 		}
-		utils.Info("AI 发送消息", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID), utils.F("message", string(payload)))
+		utils.Info("AI 发送消息", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID), utils.F("message", string(payload)))
 
 		// 向房间的命令通道发送消息，和玩家一样的处理方式
-		Rooms[roomID].Room.CmdCh <- domain.Command{
+		room.CmdCh <- domain.Command{
 			Type:     aiMsg["type"].(string),
 			PlayerID: playerId,
 			Payload:  payload,
 			Conn:     conn,
 		}
 
-		utils.Info("AI 发送命令", utils.F("room_id", roomID), utils.F("player_id", playerId), utils.F("command_type", aiMsg["type"]))
+		utils.Info("AI 发送命令", utils.F("room_id", room.ID), utils.F("player_id", playerId), utils.F("command_type", aiMsg["type"]))
 	}()
 
 	return true
