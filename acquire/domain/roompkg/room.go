@@ -14,7 +14,7 @@ import (
 	"go-game/utils"
 	"sync"
 
-	"math/rand/v2"
+	"sort"
 
 	"github.com/gorilla/websocket"
 )
@@ -590,12 +590,18 @@ func HandleReadyMessage(r *domain.Room, cmd domain.Command) {
 			}
 
 			playerIDs := make([]string, 0, len(r.Players))
-			for pid := range r.Players {
-				playerIDs = append(playerIDs, pid)
+			for pid, pc := range r.Players {
+				if pc != nil {
+					playerIDs = append(playerIDs, pid)
+				}
 			}
-
-			randomPlayerID := playerIDs[rand.IntN(len(playerIDs))]
-			err = data.SetCurrentPlayer(repository.Rdb, repository.Ctx, r.ID, randomPlayerID)
+			if len(playerIDs) == 0 {
+				utils.Error("没有在线玩家，无法设置当前玩家", utils.F("room_id", r.ID))
+				return
+			}
+			sort.Strings(playerIDs)
+			firstPlayerID := playerIDs[0]
+			err = data.SetCurrentPlayer(repository.Rdb, repository.Ctx, r.ID, firstPlayerID)
 			if err != nil {
 				utils.Error("设置当前玩家失败", utils.F("room_id", r.ID), utils.F("error", err))
 				return

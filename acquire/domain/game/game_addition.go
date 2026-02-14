@@ -11,6 +11,7 @@ import (
 	"go-game/utils"
 	"log"
 	"math/rand/v2"
+	"sort"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -23,34 +24,47 @@ func SwitchToNextPlayer(
 	r *domain.Room,
 	currentPlayerID string,
 ) error {
-
-	if r == nil || len(r.PlayerSeq) == 0 {
+	if r == nil || len(r.Players) == 0 {
 		return fmt.Errorf("房间 %s 没有玩家", r.ID)
 	}
 
-	// 1️⃣ 找到当前玩家在顺序表中的索引
-	currentIdx := -1
-	for i, pid := range r.PlayerSeq {
+	// 基于 Players 构建稳定且可重复的循环顺序：按 playerID 排序，仅保留在线玩家
+	ids := make([]string, 0, len(r.Players))
+	for pid, pc := range r.Players {
+		if pc != nil {
+			ids = append(ids, pid)
+		}
+	}
+	if len(ids) == 0 {
+		return fmt.Errorf("房间 %s 没有在线玩家", r.ID)
+	}
+	sort.Strings(ids)
+
+	// 找到当前玩家在排序序列中的位置，不存在则视为 -1
+	curIdx := -1
+	for i, pid := range ids {
 		if pid == currentPlayerID {
-			currentIdx = i
+			curIdx = i
 			break
 		}
 	}
 
-	if currentIdx == -1 {
-		return fmt.Errorf("未找到当前玩家 %s", currentPlayerID)
+	// 计算下一个玩家（循环），若未找到当前玩家则从序列首位开始
+	var nextPlayerID string
+	if curIdx == -1 {
+		nextPlayerID = ids[0]
+	} else {
+		nextPlayerID = ids[(curIdx+1)%len(ids)]
 	}
 
-	// 2️⃣ 计算下一个玩家索引（循环）
-	nextIdx := (currentIdx + 1) % len(r.PlayerSeq)
-	nextPlayerID := r.PlayerSeq[nextIdx]
+	if nextPlayerID == "" {
+		return fmt.Errorf("无法确定下一个玩家")
+	}
 
-	// 3️⃣ 校验玩家是否仍存在（防止中途退出）
 	if _, ok := r.Players[nextPlayerID]; !ok {
 		return fmt.Errorf("下一个玩家 %s 不存在", nextPlayerID)
 	}
 
-	// 4️⃣ 设置当前玩家（持久化）
 	if err := data.SetCurrentPlayer(rdb, ctx, r.ID, nextPlayerID); err != nil {
 		return fmt.Errorf("切换当前玩家失败: %w", err)
 	}
