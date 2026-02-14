@@ -420,11 +420,6 @@ func MaybeRunAIIfNeeded(room *domain.Room, message []byte) bool {
 				"type":    "game_merging_settle",
 				"payload": map[string]interface{}{"actions": settle},
 			}
-		case "end":
-			utils.Info("AI 选择重新开始游戏", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID))
-			aiMsg = map[string]interface{}{
-				"type": "game_restart_game",
-			}
 		default:
 			utils.Warn("当前状态未定义 AI 行为", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID), utils.F("game_status", gameStatus))
 			return

@@ -75,8 +75,6 @@ func (r *RoomService) handleCommand(cmd domain.Command) {
 	// 	game.HandleGameEndMessage(r.Room, cmd)
 	case "game_play_audio":
 		game.HandlePlayAudioMessage(r.Room, cmd)
-	case "game_restart":
-		game.HandleRestartGameMessage(r.Room, cmd)
 	case "game_restart_game":
 		game.HandleRestartGameMessage(r.Room, cmd)
 	default:
