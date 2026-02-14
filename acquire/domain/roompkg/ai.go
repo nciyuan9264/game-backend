@@ -294,10 +294,28 @@ func MaybeRunAIIfNeeded(roomID string, message []byte) bool {
 	if !ok || playerId == "" || (playerId != currentPlayerID && gameStatus != dto.RoomStatusMergingSettle) {
 		return false
 	}
+	// 判断是否是 AI 玩家 - 检查两种情况：
+	// 1. 玩家ID以 "ai_" 开头（原始AI玩家）
+	// 2. 或者在房间的玩家列表中，该玩家被标记为AI
+	isAI := IsAIPlayer(currentPlayerID)
+	if !isAI && gameStatus != dto.RoomStatusMergingSettle {
+		// 检查房间内存中的玩家状态
+		roomService, roomExists := Rooms[roomID]
+		if roomExists {
+			utils.Info("当前玩家 %s 尝试运行 AI", utils.F("player_id", currentPlayerID))
+			player, playerExists := roomService.Room.Players[currentPlayerID]
+			utils.Info("当前玩家 %s 存在于房间中", utils.F("player_id", currentPlayerID), utils.F("playerExists", playerExists))
+			if playerExists && player.AI {
+				isAI = true
+				utils.Info("检测到被替换为AI的玩家", utils.F("room_id", roomID), utils.F("player_id", currentPlayerID))
+			}
+		}
 
-	// 判断是否是 AI 玩家
-	if !IsAIPlayer(currentPlayerID) && gameStatus != dto.RoomStatusMergingSettle {
-		return false
+		utils.Info("当前玩家 %s 不是 AI 玩家", utils.F("player_id", currentPlayerID))
+
+		if !isAI {
+			return false
+		}
 	}
 
 	// 提取临时数据（合并选择）

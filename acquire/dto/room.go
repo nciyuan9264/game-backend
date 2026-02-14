@@ -1,5 +1,9 @@
 package dto
 
+import (
+	"time"
+)
+
 type RoomPlayer struct {
 	PlayerID string `json:"playerID"`
 	Online   bool   `json:"online"`
@@ -43,9 +47,10 @@ type Tile struct {
 }
 
 type PlayerConn struct {
-	PlayerID string        `json:"playerID"`
-	Conn     ConnInterface `json:"-"`
-	Online   bool          `json:"online"`
-	Ready    bool          `json:"ready"`
-	AI       bool          `json:"ai"`
+	PlayerID     string        `json:"playerID"`
+	Conn         ConnInterface `json:"-"`
+	Online       bool          `json:"online"`
+	Ready        bool          `json:"ready"`
+	AI           bool          `json:"ai"`
+	OfflineTimer *time.Timer   `json:"-"`
 }

@@ -93,9 +93,6 @@ func MarkPlayerOffline(r *domain.Room, playerID string) (roomDeleted bool) {
 			}
 		}
 		delete(r.Players, playerID)
-		if playerID == r.OwnerID {
-			ownerLeft = true
-		}
 		utils.Info("玩家已从匹配队列中移除", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 	} else {
 		p, ok := r.Players[playerID]
@@ -111,9 +108,47 @@ func MarkPlayerOffline(r *domain.Room, playerID string) (roomDeleted bool) {
 		p.Online = false
 		p.Conn = nil
 
+		// 设置3分钟定时器，检测是否需要替换为AI
+		if !p.AI {
+			// 取消之前的定时器（如果有）
+			if p.OfflineTimer != nil {
+				p.OfflineTimer.Stop()
+			}
+
+			p.OfflineTimer = time.AfterFunc(2*time.Minute, func() {
+				r.RoomLock.Lock()
+				defer r.RoomLock.Unlock()
+
+				utils.Info("开始计时", utils.F("room_id", r.ID), utils.F("player_id", playerID))
+
+				// 再次检查玩家状态
+				player, ok := r.Players[playerID]
+				if !ok || player.Online || player.AI {
+					return
+				}
+
+				// 检查房间中是否还有其他在线的真实玩家
+				hasOnlineRealPlayer := false
+				for _, otherPlayer := range r.Players {
+					if !otherPlayer.AI && otherPlayer.Online {
+						hasOnlineRealPlayer = true
+						break
+					}
+				}
+
+				if hasOnlineRealPlayer {
+					// 替换为AI
+					ReplacePlayerWithAI(r, playerID)
+				}
+			})
+		}
+
 		utils.Info("玩家标记为离线", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 	}
 
+	if playerID == r.OwnerID {
+		ownerLeft = true
+	}
 	utils.Info("玩家是否是房主", utils.F("room_id", r.ID), utils.F("player_id", playerID), utils.F("is_owner", ownerLeft))
 	if ownerLeft {
 		return transferOwnerOrDelete(r)
@@ -199,8 +234,8 @@ func (r *RoomService) handleCommand(cmd domain.Command) {
 		game.HandleBuyStockMessage(r.Room, cmd)
 	case "game_merging_selection":
 		game.HandleMergingSelectionMessage(r.Room, cmd)
-	case "game_end":
-		game.HandleGameEndMessage(r.Room, cmd)
+	// case "game_end":
+	// 	game.HandleGameEndMessage(r.Room, cmd)
 	case "game_play_audio":
 		game.HandlePlayAudioMessage(r.Room, cmd)
 	case "game_restart":
@@ -220,13 +255,28 @@ func handleConnectCommand(r *domain.Room, cmd domain.Command) {
 	// 1️⃣ 已存在玩家（重连 or 重复）
 	if p, ok := r.Players[playerID]; ok {
 		utils.Info("玩家尝试加入房间", utils.F("room_id", r.ID), utils.F("player_id", playerID), utils.F("current_status", p.Online))
-		if !p.Online {
+		if !p.Online || p.AI {
 			// 检查是否是真实连接
 			if realConn, ok := conn.(*dto.RealConn); ok {
 				realConn.StartHeartbeat()
 			}
 			p.Conn = conn
 			p.Online = true
+
+			// 取消离线定时器（如果有）
+			if p.OfflineTimer != nil {
+				p.OfflineTimer.Stop()
+				p.OfflineTimer = nil
+			}
+
+			// 如果玩家之前被替换为AI，恢复为真实玩家
+			if p.AI {
+				p.AI = false
+				utils.Info("玩家从AI恢复为真实玩家", utils.F("room_id", r.ID), utils.F("player_id", playerID))
+			}
+			p.Conn = cmd.Conn
+			p.Online = true
+
 			utils.Info("玩家重连成功", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 			return
 		}
@@ -474,6 +524,34 @@ func RemovePlayer(r *domain.Room, playerID string) bool {
 	}
 	utils.Info("玩家从房间移除", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 	return true
+}
+
+// ReplacePlayerWithAI 将离线玩家替换为AI玩家
+func ReplacePlayerWithAI(r *domain.Room, playerID string) {
+	player, ok := r.Players[playerID]
+	if !ok {
+		utils.Error("房间中不存在玩家", utils.F("room_id", r.ID), utils.F("player_id", playerID))
+		return
+	}
+
+	// 取消定时器
+	if player.OfflineTimer != nil {
+		player.OfflineTimer.Stop()
+		player.OfflineTimer = nil
+	}
+
+	// 标记玩家为AI
+	player.AI = true
+	player.Online = true // AI玩家始终在线
+	player.Conn = &VirtualConn{PlayerID: playerID, RoomID: r.ID}
+	err := data.SetRoomStatus(repository.Rdb, r.ID, true)
+	if err != nil {
+		utils.Error("设置房间状态失败", utils.F("room_id", r.ID), utils.F("error", err))
+		return
+	}
+	game.BroadcastToRoom(r)
+	utils.Info("玩家替换为AI", utils.F("room_id", r.ID), utils.F("player_id", playerID))
+	utils.Info("Redis中玩家状态已更新为AI", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 }
 
 func HandleRemovePlayer(r *domain.Room, cmd domain.Command) {

@@ -103,16 +103,16 @@ func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[
 }
 
 // 向该客户端发送同步消息
-func SyncRoomMessage(conn dto.ConnInterface, roomID string, playerID string, result map[string]int) error {
+func SyncRoomMessage(conn dto.ConnInterface, room *domain.Room, pc *dto.PlayerConn, result map[string]int) error {
 	rdb := repository.Rdb
 	ctx := repository.Ctx
 
 	// ------- 构造 Redis Key -------
-	infoKey := fmt.Sprintf("room:%s:player:%s:info", roomID, playerID)
-	tilesKey := fmt.Sprintf("room:%s:player:%s:tiles", roomID, playerID)
-	currentPlayerKey := fmt.Sprintf("room:%s:currentPlayer", roomID)
-	companyIDsKey := fmt.Sprintf("room:%s:company_ids", roomID)
-	lastTileKey := fmt.Sprintf("room:%s:last_tile_key_temp", roomID)
+	infoKey := fmt.Sprintf("room:%s:player:%s:info", room.ID, pc.PlayerID)
+	tilesKey := fmt.Sprintf("room:%s:player:%s:tiles", room.ID, pc.PlayerID)
+	currentPlayerKey := fmt.Sprintf("room:%s:currentPlayer", room.ID)
+	companyIDsKey := fmt.Sprintf("room:%s:company_ids", room.ID)
+	lastTileKey := fmt.Sprintf("room:%s:last_tile_key_temp", room.ID)
 
 	// ------- 第一次 pipeline：玩家、房间、tile 基础数据 -------
 	pipe := rdb.Pipeline()
@@ -140,7 +140,7 @@ func SyncRoomMessage(conn dto.ConnInterface, roomID string, playerID string, res
 	companyCmds := make(map[string]*redis.StringStringMapCmd)
 
 	for _, companyID := range companyIDs {
-		companyKey := fmt.Sprintf("room:%s:company:%s", roomID, companyID)
+		companyKey := fmt.Sprintf("room:%s:company:%s", room.ID, companyID)
 		companyCmds[companyID] = pipe2.HGetAll(ctx, companyKey)
 	}
 
@@ -149,47 +149,56 @@ func SyncRoomMessage(conn dto.ConnInterface, roomID string, playerID string, res
 		return fmt.Errorf("❌ 获取公司信息 pipeline 执行失败: %w", err)
 	}
 
-	companyInfo, err := data.GetCompanyInfo(rdb, roomID)
+	companyInfo, err := data.GetCompanyInfo(rdb, room.ID)
 	if err != nil {
 		return fmt.Errorf("❌ 获取公司信息失败: %w", err)
 	}
 
-	roomInfo, err := data.GetRoomInfo(rdb, roomID)
+	roomInfo, err := data.GetRoomInfo(rdb, room.ID)
 	if err != nil {
 		return fmt.Errorf("❌ 获取房间信息失败: %w", err)
 	}
 
 	// ------- 其他 Redis 相关调用 -------
-	tileMap, err := data.GetAllRoomTiles(rdb, roomID)
+	tileMap, err := data.GetAllRoomTiles(rdb, room.ID)
 	if err != nil {
 		return fmt.Errorf("❌ 获取房间 tile 信息失败: %w", err)
 	}
 
-	merge_main_company_temp, err := data.GetMergeMainCompany(rdb, ctx, roomID)
+	merge_main_company_temp, err := data.GetMergeMainCompany(rdb, ctx, room.ID)
 	if err != nil {
 		return fmt.Errorf("❌ 获取合并主公司信息失败: %w", err)
 	}
 
-	merge_selection_temp, err := data.GetMergingSelection(rdb, ctx, roomID)
+	merge_selection_temp, err := data.GetMergingSelection(rdb, ctx, room.ID)
 	if err != nil {
 		return fmt.Errorf("❌ 获取合并选择信息失败: %w", err)
 	}
 
-	mergeSettleData, err := data.GetMergeSettleData(ctx, rdb, roomID)
+	mergeSettleData, err := data.GetMergeSettleData(ctx, rdb, room.ID)
 	if err != nil {
 		return fmt.Errorf("❌ 获取合并结算信息失败: %w", err)
 	}
 
-	stocks, err := data.GetPlayerStocks(rdb, ctx, roomID, playerID)
+	stocks, err := data.GetPlayerStocks(rdb, ctx, room.ID, pc.PlayerID)
 	if err != nil {
 		return fmt.Errorf("❌ 获取玩家股票信息失败: %w", err)
 	}
 
 	// ------- 组装消息 -------
+	playersInfo := make(map[string]interface{}, 0)
+	for _, pc := range room.Players {
+		playersInfo[pc.PlayerID] = map[string]interface{}{
+			"playerID": pc.PlayerID,
+			"online":   pc.Online,
+			"ai":       pc.AI,
+		}
+	}
+
 	msg := map[string]interface{}{
 		"type":     "ROOM_SYNC",
 		"result":   result,
-		"playerId": playerID,
+		"playerId": pc.PlayerID,
 		"playerData": map[string]interface{}{
 			"info":   info,
 			"stocks": stocks,
@@ -200,6 +209,7 @@ func SyncRoomMessage(conn dto.ConnInterface, roomID string, playerID string, res
 			"currentPlayer": currentPlayer,
 			"roomInfo":      roomInfo,
 			"tiles":         tileMap,
+			"players":       playersInfo,
 		},
 		"tempData": map[string]interface{}{
 			"last_tile_key":           lastTile,
@@ -214,23 +224,35 @@ func SyncRoomMessage(conn dto.ConnInterface, roomID string, playerID string, res
 	if err != nil {
 		return fmt.Errorf("❌ 编码 JSON 失败: %w", err)
 	}
-	if playerID == currentPlayer {
-		WriteGameLog(roomID, playerID, roomInfo, msg)
+	if pc.PlayerID == currentPlayer {
+		WriteGameLog(room.ID, pc.PlayerID, roomInfo, msg)
 	}
 	return conn.WriteMessage(websocket.TextMessage, data)
 }
 
-func SyncMatchMessage(conn dto.ConnInterface, roomID string, playerID string, roomInfo *domain.Room) error {
+func SyncMatchMessage(conn dto.ConnInterface, room *domain.Room, pc *dto.PlayerConn, snapshot *domain.Room) error {
+	playersInfo := make([]map[string]interface{}, 0)
+	for _, p := range room.Players {
+		playersInfo = append(playersInfo, map[string]interface{}{
+			"playerID": p.PlayerID,
+			"online":   p.Online,
+			"ai":       p.AI,
+			"ready":    p.Ready,
+		})
+	}
+
 	msg := struct {
-		Type     string       `json:"type"`
-		RoomID   string       `json:"roomID"`
-		PlayerID string       `json:"playerID"`
-		Room     *domain.Room `json:"room"`
+		Type     string                   `json:"type"`
+		RoomID   string                   `json:"roomID"`
+		PlayerID string                   `json:"playerID"`
+		Room     *domain.Room             `json:"room"`
+		Players  []map[string]interface{} `json:"players"`
 	}{
 		Type:     "MATCH_SYNC",
-		RoomID:   roomID,
-		PlayerID: playerID,
-		Room:     roomInfo,
+		RoomID:   room.ID,
+		PlayerID: pc.PlayerID,
+		Room:     snapshot,
+		Players:  playersInfo,
 	}
 
 	// ------- JSON 编码 -------
@@ -265,6 +287,41 @@ func BroadcastToRoom(room *domain.Room) {
 	for _, tile := range tileMap {
 		if tile.Belong != "" && tile.Belong != "Blank" {
 			allTileMap[tile.Belong] = allTileMap[tile.Belong] + 1
+		}
+	}
+
+	gameShouldEnd := false
+	totalTiles := 0
+	allCompaniesAbove11 := true
+
+	for company, tileCount := range allTileMap {
+		totalTiles += tileCount
+
+		if tileCount >= 41 {
+			gameShouldEnd = true
+			log.Printf("游戏结束：公司[%s]的 tile 数量[%d] >= 41\n", company, tileCount)
+			break
+		}
+
+		if tileCount <= 11 {
+			allCompaniesAbove11 = false
+		}
+	}
+
+	if !gameShouldEnd && allCompaniesAbove11 && totalTiles > 54 {
+		gameShouldEnd = true
+		log.Printf("游戏结束：每个公司 tile 都 > 11 且 tile 被公司占用总数[%d] > 54\n", totalTiles)
+	}
+
+	if gameShouldEnd {
+		roomInfo, err := data.GetRoomInfo(repository.Rdb, room.ID)
+		if err != nil {
+			log.Println("获取房间信息失败:", err)
+		} else if roomInfo.GameStatus != dto.RoomStatusEnd {
+			err = data.SetGameStatus(repository.Rdb, room.ID, dto.RoomStatusEnd)
+			if err != nil {
+				log.Println("设置房间状态为 end 失败:", err)
+			}
 		}
 	}
 
@@ -311,9 +368,11 @@ func BroadcastToRoom(room *domain.Room) {
 	}
 
 	for _, pc := range room.Players {
+		utils.Info("向玩家 %s 发送同步消息", utils.F("player_id", pc.PlayerID), utils.F("pc.AI", pc.AI))
+
 		if pc.Online {
 			// 尝试发送消息
-			if err := SyncRoomMessage(pc.Conn, room.ID, pc.PlayerID, result); err != nil {
+			if err := SyncRoomMessage(pc.Conn, room, pc, result); err != nil {
 				log.Println("广播失败，移除连接:", pc.PlayerID)
 				pc.Conn.Close()
 			}
@@ -345,8 +404,8 @@ func BroadcastToMatch(room *domain.Room) {
 
 		if err := SyncMatchMessage(
 			pc.Conn,
-			room.ID,
-			pc.PlayerID,
+			room,
+			pc,
 			snapshot,
 		); err != nil {
 			log.Println("广播失败，关闭连接:", pc.PlayerID, err)
