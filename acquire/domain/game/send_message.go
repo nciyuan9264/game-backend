@@ -9,7 +9,6 @@ import (
 	"go-game/entities"
 	"go-game/repository"
 	"go-game/utils"
-	"log"
 	"os"
 	"path"
 	"reflect"
@@ -36,7 +35,7 @@ func CalculateTotalValue(playerStocks map[string]int, companyInfoMap map[string]
 	for company, count := range playerStocks {
 		companyInfo, ok := companyInfoMap[company]
 		if !ok {
-			log.Printf("无法找到公司信息: %s\n", company)
+			utils.Error("无法找到公司信息", utils.F("company", company))
 			continue
 		}
 		totalValue += count * companyInfo.StockPrice
@@ -63,7 +62,7 @@ func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[
 
 		// 确保目录存在
 		if err := os.MkdirAll(path.Dir(logPath), 0755); err != nil {
-			log.Println("❌ 创建日志目录失败:", err)
+			utils.Error("创建日志目录失败", utils.F("log_path", logPath), utils.F("error", err))
 			return
 		}
 
@@ -79,13 +78,13 @@ func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[
 
 		jsonEntry, err := json.Marshal(entry)
 		if err != nil {
-			log.Println("❌ 序列化日志 entry 失败:", err)
+			utils.Error("序列化日志 entry 失败", utils.F("error", err))
 			return
 		}
 
 		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
-			log.Println("❌ 打开游戏日志文件失败:", err)
+			utils.Error("打开游戏日志文件失败", utils.F("log_path", logPath), utils.F("error", err))
 			return
 		}
 		defer f.Close()
@@ -93,11 +92,11 @@ func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[
 		jsonEntry = append(jsonEntry, ',')
 
 		if _, err := f.Write(jsonEntry); err != nil {
-			log.Println("❌ 写入日志失败:", err)
+			utils.Error("写入日志失败", utils.F("log_path", logPath), utils.F("error", err))
 			return
 		}
 		if _, err := f.Write([]byte("\n")); err != nil {
-			log.Println("❌ 写入换行失败:", err)
+			utils.Error("写入换行失败", utils.F("log_path", logPath), utils.F("error", err))
 		}
 	}()
 }
@@ -274,13 +273,13 @@ func SyncMatchMessage(conn dto.ConnInterface, room *domain.Room, pc *dto.PlayerC
 func BroadcastToRoom(room *domain.Room) {
 	companyInfoMap, err := data.GetCompanyInfo(repository.Rdb, room.ID)
 	if err != nil {
-		log.Println("获取公司信息失败:", err)
+		utils.Error("获取公司信息失败", utils.F("room_id", room.ID), utils.F("error", err))
 		return
 	}
 
 	tileMap, err := data.GetAllRoomTiles(repository.Rdb, room.ID)
 	if err != nil {
-		log.Println("获取所有 tile 失败:", err)
+		utils.Error("获取所有 tile 失败", utils.F("room_id", room.ID), utils.F("error", err))
 		return
 	}
 	allTileMap := make(map[string]int)
@@ -299,7 +298,7 @@ func BroadcastToRoom(room *domain.Room) {
 
 		if tileCount >= 41 {
 			gameShouldEnd = true
-			log.Printf("游戏结束：公司[%s]的 tile 数量[%d] >= 41\n", company, tileCount)
+			utils.Info("游戏结束：公司[%s]的 tile 数量[%d] >= 41", utils.F("company", company), utils.F("tile_count", tileCount))
 			break
 		}
 
@@ -310,17 +309,18 @@ func BroadcastToRoom(room *domain.Room) {
 
 	if !gameShouldEnd && allCompaniesAbove11 && totalTiles > 54 {
 		gameShouldEnd = true
-		log.Printf("游戏结束：每个公司 tile 都 > 11 且 tile 被公司占用总数[%d] > 54\n", totalTiles)
+		utils.Info("游戏结束：每个公司 tile 都 > 11 且 tile 被公司占用总数[%d] > 54", utils.F("total_tiles", totalTiles))
 	}
 
 	if gameShouldEnd {
 		roomInfo, err := data.GetRoomInfo(repository.Rdb, room.ID)
 		if err != nil {
-			log.Println("获取房间信息失败:", err)
+			utils.Error("获取房间信息失败", utils.F("room_id", room.ID), utils.F("error", err))
+			return
 		} else if roomInfo.GameStatus != dto.RoomStatusEnd {
 			err = data.SetGameStatus(repository.Rdb, room.ID, dto.RoomStatusEnd)
 			if err != nil {
-				log.Println("设置房间状态为 end 失败:", err)
+				utils.Error("设置房间状态为 end 失败", utils.F("room_id", room.ID), utils.F("error", err))
 			}
 		}
 	}
@@ -329,7 +329,7 @@ func BroadcastToRoom(room *domain.Room) {
 	for _, pc := range room.Players {
 		stockMap, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, room.ID, pc.PlayerID)
 		if err != nil {
-			log.Printf("❌ 获取玩家[%s]股票失败: %v\n", pc.PlayerID, err)
+			utils.Error("获取玩家股票失败", utils.F("player_id", pc.PlayerID), utils.F("error", err))
 			return
 		}
 		for stockID, stockCount := range stockMap {
@@ -348,7 +348,7 @@ func BroadcastToRoom(room *domain.Room) {
 
 	err = data.SetCompanyInfo(repository.Rdb, room.ID, companyInfoMap)
 	if err != nil {
-		log.Println("❌ 设置公司信息失败:", err)
+		utils.Error("设置公司信息失败", utils.F("room_id", room.ID), utils.F("error", err))
 		return
 	}
 
@@ -356,12 +356,12 @@ func BroadcastToRoom(room *domain.Room) {
 	for _, pc := range room.Players {
 		playerStocks, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, room.ID, pc.PlayerID)
 		if err != nil {
-			log.Printf("❌ 获取玩家[%s]股票失败: %v\n", pc.PlayerID, err)
+			utils.Error("获取玩家股票失败", utils.F("player_id", pc.PlayerID), utils.F("error", err))
 			continue
 		}
 		playerInfo, err := data.GetPlayerInfoField(repository.Rdb, repository.Ctx, room.ID, pc.PlayerID, "money")
 		if err != nil {
-			log.Printf("❌ 获取玩家[%s]金钱失败: %v\n", pc.PlayerID, err)
+			utils.Error("获取玩家金钱失败", utils.F("player_id", pc.PlayerID), utils.F("error", err))
 			continue
 		}
 		result[pc.PlayerID] = CalculateTotalValue(playerStocks, companyInfoMap) + playerInfo.Money
@@ -373,7 +373,7 @@ func BroadcastToRoom(room *domain.Room) {
 		if pc.Online {
 			// 尝试发送消息
 			if err := SyncRoomMessage(pc.Conn, room, pc, result); err != nil {
-				log.Println("广播失败，移除连接:", pc.PlayerID)
+				utils.Error("广播失败，移除连接", utils.F("player_id", pc.PlayerID), utils.F("error", err))
 				pc.Conn.Close()
 			}
 		}
@@ -408,7 +408,7 @@ func BroadcastToMatch(room *domain.Room) {
 			pc,
 			snapshot,
 		); err != nil {
-			log.Println("广播失败，关闭连接:", pc.PlayerID, err)
+			utils.Error("广播失败，关闭连接", utils.F("player_id", pc.PlayerID), utils.F("error", err))
 			pc.Conn.Close()
 			pc.Online = false
 		}

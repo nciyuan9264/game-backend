@@ -9,7 +9,6 @@ import (
 	"go-game/dto"
 	"go-game/repository"
 	"go-game/utils"
-	"log"
 	"math/rand/v2"
 	"sort"
 	"time"
@@ -69,7 +68,7 @@ func SwitchToNextPlayer(
 		return fmt.Errorf("切换当前玩家失败: %w", err)
 	}
 
-	log.Printf("✅ 房间 %s 当前玩家切换为: %s\n", r.ID, nextPlayerID)
+	utils.Info("房间 %s 当前玩家切换为: %s", utils.F("room_id", r.ID), utils.F("next_player_id", nextPlayerID))
 	return nil
 }
 
@@ -80,7 +79,7 @@ type PlayAudioPayload struct {
 func HandlePlayAudioMessage(r *domain.Room, cmd domain.Command) {
 	var p PlayAudioPayload
 	if err := json.Unmarshal(cmd.Payload, &p); err != nil {
-		log.Println("❌ 消息格式错误:", err)
+		utils.Error("消息格式错误", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("error", err))
 		return
 	}
 	audioType := p.AudioType
@@ -91,7 +90,7 @@ func HandlePlayAudioMessage(r *domain.Room, cmd domain.Command) {
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {
-		log.Println("❌ 编码 JSON 失败:", err)
+		utils.Error("编码 JSON 失败", utils.F("error", err))
 		return
 	}
 
@@ -99,7 +98,7 @@ func HandlePlayAudioMessage(r *domain.Room, cmd domain.Command) {
 		if pc.Online && pc.Conn != nil {
 			err := pc.Conn.WriteMessage(websocket.TextMessage, data)
 			if err != nil {
-				log.Printf("❌ 向玩家 %s 发送音频消息失败: %v\n", pc.PlayerID, err)
+				utils.Error("向玩家 %s 发送音频消息失败", utils.F("player_id", pc.PlayerID), utils.F("error", err))
 			}
 		}
 	}
@@ -108,7 +107,7 @@ func HandlePlayAudioMessage(r *domain.Room, cmd domain.Command) {
 func HandleRestartGameMessage(r *domain.Room, cmd domain.Command) {
 	// 重置上次落子
 	if err := data.SetLastTileKey(repository.Rdb, repository.Ctx, r.ID, cmd.PlayerID, ""); err != nil {
-		log.Println("❌ 设置最后放置的 tile 失败:", err)
+		utils.Error("设置最后放置的 tile 失败", utils.F("error", err))
 		return
 	}
 	// 重置游戏状态
@@ -116,7 +115,7 @@ func HandleRestartGameMessage(r *domain.Room, cmd domain.Command) {
 	// 重置tiles
 	tile, err := data.GetAllRoomTiles(repository.Rdb, r.ID)
 	if err != nil {
-		log.Println("❌ 获取所有 tile 失败:", err)
+		utils.Error("获取所有 tile 失败", utils.F("error", err))
 		return
 	}
 	for tileKey, tileInfo := range tile {
@@ -125,7 +124,7 @@ func HandleRestartGameMessage(r *domain.Room, cmd domain.Command) {
 	}
 	err = data.SetAllRoomTiles(repository.Rdb, r.ID, tile)
 	if err != nil {
-		log.Println("❌ 重置 tile 失败:", err)
+		utils.Error("重置 tile 失败", utils.F("error", err))
 		return
 	}
 
@@ -134,22 +133,25 @@ func HandleRestartGameMessage(r *domain.Room, cmd domain.Command) {
 		// 2. 设置初始资金
 		err = data.SetPlayerInfoField(repository.Rdb, repository.Ctx, r.ID, playerID, "money", 6000)
 		if err != nil {
-			log.Println("设置玩家信息失败:", err)
+			utils.Error("设置玩家信息失败", utils.F("player_id", playerID), utils.F("error", err))
+			return
 		}
 
 		allTiles, err := data.GenerateAvailableTiles(r)
 		if err != nil {
-			log.Println(err)
+			utils.Error("生成可用 tile 失败", utils.F("error", err))
+			return
 		}
 		rand.Shuffle(len(allTiles), func(i, j int) { allTiles[i], allTiles[j] = allTiles[j], allTiles[i] })
 		playerTiles := utils.SafeSlice(allTiles, 5)
 		err = data.SetPlayerTiles(repository.Rdb, repository.Ctx, r.ID, playerID, playerTiles)
 		if err != nil {
-			log.Println(err)
+			utils.Error("添加 tile 失败", utils.F("player_id", playerID), utils.F("error", err))
+			return
 		}
 		companyIDs, err := data.GetCompanyIDs(r.ID)
 		if err != nil {
-			log.Println("获取公司ID失败:", err)
+			utils.Error("获取公司ID失败", utils.F("error", err))
 			return
 		}
 		// 3.2 初始化玩家股票为0
@@ -159,7 +161,8 @@ func HandleRestartGameMessage(r *domain.Room, cmd domain.Command) {
 		}
 		err = data.SetPlayerStocks(repository.Rdb, repository.Ctx, r.ID, playerID, playerStocks)
 		if err != nil {
-			log.Println("写入玩家股票失败:", err)
+			utils.Error("写入玩家股票失败", utils.F("player_id", playerID), utils.F("error", err))
+			return
 		}
 	}
 

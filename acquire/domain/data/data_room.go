@@ -8,7 +8,6 @@ import (
 	"go-game/entities"
 	"go-game/repository"
 	"go-game/utils"
-	"log"
 	"strconv"
 
 	"github.com/go-redis/redis/v8"
@@ -51,7 +50,7 @@ func GetRoomInfo(rdb *redis.Client, roomID string) (*entities.RoomInfo, error) {
 		if val, err := strconv.Atoi(maxPlayersStr); err == nil {
 			roomInfo.MaxPlayers = val
 		} else {
-			log.Printf("⚠️ maxPlayers 转换失败: %v\n", err)
+			utils.Error("maxPlayers 转换失败", utils.F("error", err))
 		}
 	}
 
@@ -81,10 +80,10 @@ func SetGameStatus(rdb *redis.Client, roomID string, status dto.RoomStatus) erro
 	roomInfoKey := fmt.Sprintf("room:%s:roomInfo", roomID)
 	err := rdb.HSet(repository.Ctx, roomInfoKey, "gameStatus", string(status)).Err()
 	if err != nil {
-		log.Printf("更新房间状态失败（roomID: %s，gameStatus: %s）: %v\n", roomID, status, err)
+		utils.Error("更新房间状态失败", utils.F("room_id", roomID), utils.F("game_status", status), utils.F("error", err))
 		return err
 	}
-	log.Printf("房间（roomID: %s）状态已更新为：%s\n", roomID, status)
+	utils.Info("房间（roomID: %s）状态已更新为：%s", utils.F("room_id", roomID), utils.F("game_status", status))
 	return nil
 }
 
@@ -105,7 +104,7 @@ func SetCurrentPlayer(rdb *redis.Client, ctx context.Context, roomID, playerID s
 	if err := rdb.Set(ctx, key, playerID, 0).Err(); err != nil {
 		return fmt.Errorf("设置当前玩家失败: %w", err)
 	}
-	log.Printf("✅ 当前玩家已设置: roomID=%s playerID=%s\n", roomID, playerID)
+	utils.Info("✅ 当前玩家已设置: roomID=%s playerID=%s", utils.F("room_id", roomID), utils.F("player_id", playerID))
 	return nil
 }
 
@@ -127,7 +126,7 @@ func InitPlayerData(room *domain.Room, playerID string) error {
 	// 1. 检查玩家数据是否已存在
 	exists, err := IsPlayerInfoExists(repository.Rdb, repository.Ctx, room.ID, playerID)
 	if err != nil {
-		log.Println(err)
+		utils.Error("检查玩家数据失败", utils.F("room_id", room.ID), utils.F("player_id", playerID), utils.F("error", err))
 		return err
 	}
 	if exists {
@@ -136,12 +135,14 @@ func InitPlayerData(room *domain.Room, playerID string) error {
 	// 2. 设置初始资金
 	err = SetPlayerInfoField(repository.Rdb, repository.Ctx, room.ID, playerID, "money", 6000)
 	if err != nil {
-		log.Println("设置玩家信息失败:", err)
+		utils.Error("设置玩家信息失败", utils.F("room_id", room.ID), utils.F("player_id", playerID), utils.F("error", err))
+		return err
 	}
 
 	// 2. 随机抽取起始 Tiles（比如每人 5 个）
 	allTiles, err := GenerateAvailableTiles(room)
 	if err != nil {
+		utils.Error("生成可用 tile 失败", utils.F("room_id", room.ID), utils.F("player_id", playerID), utils.F("error", err))
 		return err
 	}
 	rand.Shuffle(len(allTiles), func(i, j int) { allTiles[i], allTiles[j] = allTiles[j], allTiles[i] })
@@ -149,13 +150,14 @@ func InitPlayerData(room *domain.Room, playerID string) error {
 	playerTiles := utils.SafeSlice(allTiles, 5)
 	err = SetPlayerTiles(repository.Rdb, repository.Ctx, room.ID, playerID, playerTiles)
 	if err != nil {
-		log.Println(err)
+		utils.Error("添加 tile 失败", utils.F("room_id", room.ID), utils.F("player_id", playerID), utils.F("error", err))
+		return err
 	}
 	// 3. 初始化玩家股票（全部为 0）
 	// 3.1 获取公司ID列表
 	companyIDs, err := GetCompanyIDs(room.ID)
 	if err != nil {
-		log.Println("获取公司ID失败:", err)
+		utils.Error("获取公司ID失败", utils.F("room_id", room.ID), utils.F("player_id", playerID), utils.F("error", err))
 		return err
 	}
 	// 3.2 初始化玩家股票为0
@@ -165,7 +167,8 @@ func InitPlayerData(room *domain.Room, playerID string) error {
 	}
 	err = SetPlayerStocks(repository.Rdb, repository.Ctx, room.ID, playerID, playerStocks)
 	if err != nil {
-		log.Println("写入玩家股票失败:", err)
+		utils.Error("写入玩家股票失败", utils.F("room_id", room.ID), utils.F("player_id", playerID), utils.F("error", err))
+		return err
 	}
 
 	return nil

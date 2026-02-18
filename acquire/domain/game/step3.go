@@ -6,7 +6,6 @@ import (
 	"go-game/domain/data"
 	"go-game/domain/domain"
 	"go-game/utils"
-	"log"
 	"math/rand/v2"
 
 	"github.com/go-redis/redis/v8"
@@ -19,7 +18,7 @@ func GiveRandomTileToPlayer(rdb *redis.Client, ctx context.Context, room *domain
 	}
 
 	if len(allTiles) == 0 {
-		log.Println("❌ 没有可用的 tiles")
+		utils.Warn("没有可用的 tiles")
 		return nil
 	}
 
@@ -38,6 +37,6 @@ func GiveRandomTileToPlayer(rdb *redis.Client, ctx context.Context, room *domain
 		return fmt.Errorf("添加 tile 失败: %w", err)
 	}
 
-	log.Printf("✅ 玩家 %s 获得 tile：%s\n", playerID, selected[0])
+	utils.Info("玩家获得 tile", utils.F("player_id", playerID), utils.F("tile", selected[0]))
 	return nil
 }

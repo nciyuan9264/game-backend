@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"go-game/dto"
-	"log"
+	"go-game/utils"
 	"strconv"
 
 	"github.com/go-redis/redis/v8"
@@ -84,10 +84,10 @@ func GetPlayerTiles(rdb *redis.Client, ctx context.Context, roomID, playerID str
 func AddPlayerTile(rdb *redis.Client, ctx context.Context, roomID, playerID, tileKey string) error {
 	playerTileKey := fmt.Sprintf("room:%s:player:%s:tiles", roomID, playerID)
 	if err := rdb.RPush(ctx, playerTileKey, tileKey).Err(); err != nil {
-		log.Printf("❌ 向玩家 %s 添加 tile %s 失败: %v\n", playerID, tileKey, err)
+		utils.Error("向玩家添加 tile 失败", utils.F("player_id", playerID), utils.F("tile_key", tileKey), utils.F("error", err))
 		return err
 	}
-	log.Printf("✅ 向玩家 %s 添加 tile %s 成功\n", playerID, tileKey)
+	utils.Info("✅ 向玩家添加 tile 成功", utils.F("player_id", playerID), utils.F("tile_key", tileKey))
 	return nil
 }
 

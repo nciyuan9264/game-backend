@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"go-game/dto"
 	"go-game/repository"
-	"log"
+	"go-game/utils"
 	"strconv"
 
 	"github.com/go-redis/redis/v8"
@@ -20,7 +20,7 @@ func GetConnectedTiles(rdb *redis.Client, roomID, startTileKey string) []string 
 
 	startTile, err := GetTileFromRedis(rdb, repository.Ctx, roomID, startTileKey)
 	if err != nil {
-		log.Println("无法获取起始 tile :", err)
+		utils.Error("无法获取起始 tile", utils.F("room_id", roomID), utils.F("tile_key", startTileKey), utils.F("error", err))
 		return connected
 	}
 	startTileOwner := startTile.Belong

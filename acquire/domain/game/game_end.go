@@ -5,15 +5,15 @@ import (
 	"go-game/domain/domain"
 	"go-game/dto"
 	"go-game/repository"
-	"log"
+	"go-game/utils"
 )
 
 func HandleGameEndMessage(r *domain.Room, cmd domain.Command) {
 	err := data.SetGameStatus(repository.Rdb, r.ID, dto.RoomStatusEnd)
 	if err != nil {
-		log.Println("Error setting game status:", err)
+		utils.Error("设置游戏状态失败", utils.F("room_id", r.ID), utils.F("error", err))
 		return
 	}
 	logPath := getGameLogFilePath(r.ID)
-	log.Println("✅ 游戏日志保存于:", logPath)
+	utils.Info("游戏日志保存于", utils.F("log_path", logPath))
 }

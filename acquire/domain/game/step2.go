@@ -8,7 +8,7 @@ import (
 	"go-game/domain/domain"
 	"go-game/dto"
 	"go-game/repository"
-	"log"
+	"go-game/utils"
 	"strconv"
 
 	"github.com/go-redis/redis/v8"
@@ -50,7 +50,7 @@ func UpdateCompanyStockAndTiles(rdb *redis.Client, roomID string, company string
 		return fmt.Errorf("更新公司数据失败: %w", err)
 	}
 
-	log.Println("✅ 公司已更新:", company, update)
+	utils.Info("公司已更新", utils.F("company", company), utils.F("update", update))
 	return nil
 }
 
@@ -75,7 +75,7 @@ func UpdatePlayerStockAndMoney(rdb *redis.Client, ctx context.Context, roomID st
 	// 获取玩家现有股票
 	stockMap, err := data.GetPlayerStocks(rdb, ctx, roomID, playerID)
 	if err != nil {
-		log.Printf("❌ 获取玩家[%s]股票失败: %v\n", playerID, err)
+		utils.Error("获取玩家股票失败", utils.F("player_id", playerID), utils.F("error", err))
 		return err
 	}
 
@@ -90,11 +90,11 @@ func UpdatePlayerStockAndMoney(rdb *redis.Client, ctx context.Context, roomID st
 	// 写回玩家股票信息
 	err = data.SetPlayerStocks(rdb, ctx, roomID, playerID, stockMapInterface)
 	if err != nil {
-		log.Println("❌ 写入玩家股票失败:", err)
+		utils.Error("写入玩家股票失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
 		return fmt.Errorf("写入玩家股票失败: %w", err)
 	}
 
-	log.Println("✅ 玩家数据已更新")
+	utils.Info("玩家数据已更新", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("company", company), utils.F("stock_count", stockCount), utils.F("total_price", totalPrice), utils.F("money_after", newMoney))
 	return nil
 }
 
@@ -105,7 +105,7 @@ type BuyStockPayload struct {
 func HandleBuyStockMessage(r *domain.Room, cmd domain.Command) {
 	var p BuyStockPayload
 	if err := json.Unmarshal(cmd.Payload, &p); err != nil {
-		log.Println("❌ 无效的 buy_stock payload:", err)
+		utils.Warn("无效的 buy_stock payload", utils.F("error", err))
 		return
 	}
 
@@ -113,21 +113,21 @@ func HandleBuyStockMessage(r *domain.Room, cmd domain.Command) {
 
 	currentPlayer, err := data.GetCurrentPlayer(repository.Rdb, repository.Ctx, r.ID)
 	if err != nil {
-		log.Println("❌ 获取当前玩家失败:", err)
+		utils.Error("获取当前玩家失败", utils.F("error", err))
 		return
 	}
 	if currentPlayer != cmd.PlayerID {
-		log.Println("❌ 不是当前玩家的回合")
+		utils.Warn("不是当前玩家的回合", utils.F("player_id", cmd.PlayerID), utils.F("current_player", currentPlayer))
 		return
 	}
 
 	roomInfo, err := data.GetRoomInfo(repository.Rdb, r.ID)
 	if err != nil {
-		log.Println("❌ 获取房间信息失败:", err)
+		utils.Error("获取房间信息失败", utils.F("error", err))
 		return
 	}
 	if roomInfo.GameStatus != dto.RoomStatusBuyStock {
-		log.Println("❌ 不是 buyStock 的状态")
+		utils.Warn("不是 buyStock 的状态", utils.F("status", roomInfo.GameStatus))
 		return
 	}
 
@@ -141,7 +141,7 @@ func HandleBuyStockMessage(r *domain.Room, cmd domain.Command) {
 		companyKey := fmt.Sprintf("room:%s:company:%s", r.ID, company)
 		priceStr, err := repository.Rdb.HGet(repository.Ctx, companyKey, "stockPrice").Result()
 		if err != nil {
-			log.Println("❌ 获取股价失败:", company, err)
+			utils.Error("获取股价失败", utils.F("company", company), utils.F("error", err))
 			return
 		}
 		price, _ := strconv.Atoi(priceStr)
@@ -154,7 +154,7 @@ func HandleBuyStockMessage(r *domain.Room, cmd domain.Command) {
 		count := countVal
 		for i := 0; i < count; i++ {
 			if err := UpdateCompanyStockAndTiles(repository.Rdb, r.ID, company); err != nil {
-				log.Println("❌ 更新公司失败:", err)
+				utils.Error("更新公司失败", utils.F("company", company), utils.F("error", err))
 				return
 			}
 		}
@@ -164,24 +164,24 @@ func HandleBuyStockMessage(r *domain.Room, cmd domain.Command) {
 	for company, countVal := range stocks {
 		count := countVal
 		if err := UpdatePlayerStockAndMoney(repository.Rdb, repository.Ctx, r.ID, cmd.PlayerID, company, count, priceMap[company]*count); err != nil {
-			log.Println("❌ 更新玩家失败:", err)
+			utils.Error("更新玩家失败", utils.F("player_id", cmd.PlayerID), utils.F("company", company), utils.F("error", err))
 			return
 		}
 	}
 
 	err = GiveRandomTileToPlayer(repository.Rdb, repository.Ctx, r, cmd.PlayerID)
 	if err != nil {
-		log.Println("发牌失败:", err)
+		utils.Warn("发牌失败", utils.F("player_id", cmd.PlayerID), utils.F("error", err))
 	}
 	// 切换玩家
 	if err := SwitchToNextPlayer(repository.Rdb, repository.Ctx, r, cmd.PlayerID); err != nil {
-		log.Println("切换玩家失败:", err)
+		utils.Error("切换玩家失败", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("error", err))
 	}
 	// 最后设置房间状态为 setTile
 	err = data.SetGameStatus(repository.Rdb, r.ID, dto.RoomStatusSetTile)
 	if err != nil {
-		log.Println("❌ 设置房间状态失败:", err)
+		utils.Error("设置房间状态失败", utils.F("room_id", r.ID), utils.F("error", err))
 	}
 
-	log.Println("✅ 玩家购买股票成功")
+	utils.Info("玩家购买股票成功", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("total_price", totalPrice))
 }
