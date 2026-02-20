@@ -307,9 +307,9 @@ func BroadcastToRoom(room *domain.Room) {
 		}
 	}
 
-	if !gameShouldEnd && allCompaniesAbove11 && totalTiles > 54 {
+	if !gameShouldEnd && allCompaniesAbove11 && totalTiles > 90 {
 		gameShouldEnd = true
-		utils.Info("游戏结束：每个公司 tile 都 > 11 且 tile 被公司占用总数[%d] > 54", utils.F("total_tiles", totalTiles))
+		utils.Info("游戏结束：每个公司 tile 都 > 11 且 tile 被公司占用总数[%d] > 90", utils.F("total_tiles", totalTiles))
 	}
 
 	if gameShouldEnd {
