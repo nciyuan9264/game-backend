@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"go-game/domain/domain"
 	"go-game/domain/roompkg"
-	"go-game/dto"
 	"go-game/utils"
 	"net/http"
 
@@ -63,7 +62,7 @@ func HandleWebSocket(c *gin.Context) {
 	}
 
 	// 创建 RealConn 实例
-	realConn := dto.NewRealConn(conn)
+	realConn := &domain.RealConn{Conn: conn}
 
 	// 1️⃣ 解析参数（保持不变）
 	roomID := c.Query("roomID")

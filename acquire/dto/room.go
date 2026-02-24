@@ -1,8 +1,6 @@
 package dto
 
-import (
-	"time"
-)
+import "go-game/domain/domain"
 
 type RoomPlayer struct {
 	PlayerID string `json:"playerID"`
@@ -11,15 +9,11 @@ type RoomPlayer struct {
 	Ready    bool   `json:"ready"`
 }
 type RoomInfo struct {
-	RoomID         string       `json:"roomID"`
-	Status         RoomStatus   `json:"status"`
-	OwnerID        string       `json:"ownerID"`
-	RoomPlayer     []RoomPlayer `json:"roomPlayer"`
-	EmptyTileCount int          `json:"emptyTileCount"`
-}
-
-type PlayerInfo struct {
-	Money int `json:"money"`
+	RoomID         string            `json:"roomID"`
+	Status         domain.RoomStatus `json:"status"`
+	OwnerID        string            `json:"ownerID"`
+	RoomPlayer     []RoomPlayer      `json:"roomPlayer"`
+	EmptyTileCount int               `json:"emptyTileCount"`
 }
 
 type CreateRoomRequest struct {
@@ -28,29 +22,10 @@ type CreateRoomRequest struct {
 	UserID     string `json:"userID" binding:"required"`
 }
 
-type DeleteRoomRequest struct {
-	RoomID string `json:"roomID" binding:"required"`
-}
-
 type CreateRoomResponse struct {
 	RoomID string `json:"roomID" binding:"required"`
 }
 
 type GetRoomList struct {
-	Rooms        []RoomInfo `json:"rooms"`
-	OnlinePlayer int        `json:"onlinePlayer"`
-}
-
-type Tile struct {
-	ID     string `json:"id"`     // "1A"
-	Belong string `json:"belong"` // 公司名
-}
-
-type PlayerConn struct {
-	PlayerID     string        `json:"playerID"`
-	Conn         ConnInterface `json:"-"`
-	Online       bool          `json:"online"`
-	Ready        bool          `json:"ready"`
-	AI           bool          `json:"ai"`
-	OfflineTimer *time.Timer   `json:"-"`
+	Rooms []RoomInfo `json:"rooms"`
 }

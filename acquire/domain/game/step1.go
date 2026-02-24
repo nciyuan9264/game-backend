@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"go-game/domain/data"
 	"go-game/domain/domain"
-	"go-game/dto"
 	"go-game/entities"
 	"go-game/repository"
 	"go-game/utils"
@@ -22,7 +21,7 @@ import (
 // PlaceTile 用于处理将棋子放置到棋盘上：修改 tile 的 belong 字段并更新 Redis，同时从玩家手牌中移除该 tile。
 func placeTile(rdb *redis.Client, ctx context.Context, roomID, playerID, tileKey string) error {
 	// Step 1：下棋
-	if err := data.UpdateTileValue(rdb, roomID, tileKey, dto.Tile{ID: tileKey, Belong: "Blank"}); err != nil {
+	if err := data.UpdateTileValue(rdb, roomID, tileKey, domain.Tile{ID: tileKey, Belong: "Blank"}); err != nil {
 		return fmt.Errorf("❌ 写入 tile 出错: %w", err)
 	}
 
@@ -47,7 +46,7 @@ func handleMergeProcess(
 	otherHotel []string,
 	hotelTileCount map[string]int,
 ) error {
-	tempSettleData := make(map[string]dto.SettleData)
+	tempSettleData := make(map[string]domain.SettleData)
 	for _, hotel := range otherHotel {
 		// Step 1：获取被并购酒店的 tile 数量
 		tileCount, ok := hotelTileCount[hotel]
@@ -154,7 +153,7 @@ func handleMergeProcess(
 				return err
 			}
 		}
-		tempSettleData[hotel] = dto.SettleData{
+		tempSettleData[hotel] = domain.SettleData{
 			Hoders:    currentCompanyHoders,
 			Dividends: dividends,
 		}
@@ -169,7 +168,7 @@ func handleMergeProcess(
 		return fmt.Errorf("❌ 保存结算数据失败: %w", err)
 	}
 	// Step 6：设置状态为“并购清算”
-	err = data.SetGameStatus(rdb, room.ID, dto.RoomStatusMergingSettle)
+	err = data.SetGameStatus(rdb, room.ID, domain.RoomStatusMergingSettle)
 	if err != nil {
 		utils.Error("设置房间状态失败", utils.F("room_id", room.ID), utils.F("error", err))
 	}
@@ -188,7 +187,7 @@ func HandlePostTilePlacement(rdb *redis.Client, ctx context.Context, room *domai
 	for _, info := range companyInfo {
 		if tilesCount := info.Tiles; tilesCount > 0 {
 			// 有公司可买，设置房间状态为“买股票”
-			if err := data.SetGameStatus(rdb, room.ID, dto.RoomStatusBuyStock); err != nil {
+			if err := data.SetGameStatus(rdb, room.ID, domain.RoomStatusBuyStock); err != nil {
 				return fmt.Errorf("更新房间状态失败: %w", err)
 			}
 			return nil
@@ -242,7 +241,7 @@ func handleMergingLogic(rdb *redis.Client, room *domain.Room, playerID string, h
 			otherHotel = append(otherHotel, key)
 		}
 		if len(otherHotel) == 0 && maxCount >= 11 {
-			err = data.SetGameStatus(rdb, room.ID, dto.RoomStatusBuyStock)
+			err = data.SetGameStatus(rdb, room.ID, domain.RoomStatusBuyStock)
 			if err != nil {
 				log.Println("❌ 设置房间状态失败:", err)
 			}
@@ -256,7 +255,7 @@ func handleMergingLogic(rdb *redis.Client, room *domain.Room, playerID string, h
 		if err != nil {
 			return err
 		}
-		err = data.SetGameStatus(rdb, room.ID, dto.RoomStatusMergingSelection)
+		err = data.SetGameStatus(rdb, room.ID, domain.RoomStatusMergingSelection)
 		if err != nil {
 			return err
 		}
@@ -273,7 +272,7 @@ func handleMergingLogic(rdb *redis.Client, room *domain.Room, playerID string, h
 			otherHotel = append(otherHotel, key)
 		}
 		if len(otherHotel) == 0 {
-			err = data.SetGameStatus(rdb, room.ID, dto.RoomStatusBuyStock)
+			err = data.SetGameStatus(rdb, room.ID, domain.RoomStatusBuyStock)
 			if err != nil {
 				log.Println("❌ 设置房间状态失败:", err)
 			}
@@ -330,7 +329,7 @@ func checkTileTriggerRules(rdb *redis.Client, room *domain.Room, playerID string
 		connectedTiles := data.GetConnectedTiles(rdb, room.ID, tileKey)
 		for _, tileKeyBlank := range connectedTiles {
 			// 写回 Redis
-			if err := data.UpdateTileValue(rdb, room.ID, tileKeyBlank, dto.Tile{ID: tileKeyBlank, Belong: company}); err != nil {
+			if err := data.UpdateTileValue(rdb, room.ID, tileKeyBlank, domain.Tile{ID: tileKeyBlank, Belong: company}); err != nil {
 				utils.Error("更新 tile 失败", utils.F("tile_key", tileKeyBlank), utils.F("error", err))
 			} else {
 				utils.Info("成功更新 tile 的归属", utils.F("tile_key", tileKeyBlank), utils.F("company", company))
@@ -343,7 +342,7 @@ func checkTileTriggerRules(rdb *redis.Client, room *domain.Room, playerID string
 		if err != nil {
 			return fmt.Errorf("获取公司数据失败: %w", err)
 		}
-		var companyData dto.Company
+		var companyData domain.Company
 		decoderConfig := &mapstructure.DecoderConfig{
 			DecodeHook: stringToIntHookFunc(),
 			Result:     &companyData,
@@ -386,7 +385,7 @@ func checkTileTriggerRules(rdb *redis.Client, room *domain.Room, playerID string
 			}
 		}
 		if !flag {
-			err = data.SetGameStatus(rdb, room.ID, dto.RoomStatusBuyStock)
+			err = data.SetGameStatus(rdb, room.ID, domain.RoomStatusBuyStock)
 			if err != nil {
 				utils.Error("设置房间状态失败", utils.F("room_id", room.ID), utils.F("error", err))
 			}
@@ -396,7 +395,7 @@ func checkTileTriggerRules(rdb *redis.Client, room *domain.Room, playerID string
 
 		utils.Warn("触发创建公司规则")
 		// Step 1: 修改房间状态为“创建公司状态”
-		err = data.SetGameStatus(rdb, room.ID, dto.RoomStatusCreateCompany)
+		err = data.SetGameStatus(rdb, room.ID, domain.RoomStatusCreateCompany)
 		if err != nil {
 			utils.Error("设置房间状态失败", utils.F("room_id", room.ID), utils.F("error", err))
 		}
@@ -438,7 +437,7 @@ func HandlePlaceTileMessage(r *domain.Room, cmd domain.Command) {
 		utils.Error("获取房间信息失败", utils.F("error", err))
 		return
 	}
-	if roomInfo.GameStatus != dto.RoomStatusSetTile {
+	if roomInfo.GameStatus != domain.RoomStatusSetTile {
 		utils.Warn("不是放置 tile 的状态", utils.F("status", roomInfo.GameStatus))
 		return
 	}
@@ -485,7 +484,7 @@ func HandleMergingSelectionMessage(r *domain.Room, cmd domain.Command) {
 		utils.Error("获取房间信息失败", utils.F("error", err))
 		return
 	}
-	if roomInfo.GameStatus != dto.RoomStatusMergingSelection {
+	if roomInfo.GameStatus != domain.RoomStatusMergingSelection {
 		utils.Warn("不是 merging_selection 的状态")
 		return
 	}
@@ -532,7 +531,7 @@ func HandleMergingSelectionMessage(r *domain.Room, cmd domain.Command) {
 }
 
 type MergingSettlePayload struct {
-	Actions []dto.MergingSettleItem `json:"actions"`
+	Actions []domain.MergingSettleItem `json:"actions"`
 }
 
 func HandleMergingSettleMessage(r *domain.Room, cmd domain.Command) {
@@ -550,7 +549,7 @@ func HandleMergingSettleMessage(r *domain.Room, cmd domain.Command) {
 		utils.Error("获取房间信息失败", utils.F("error", err))
 		return
 	}
-	if roomInfo.GameStatus != dto.RoomStatusMergingSettle {
+	if roomInfo.GameStatus != domain.RoomStatusMergingSettle {
 		utils.Warn("不是合并的状态")
 		return
 	}
@@ -732,12 +731,12 @@ func HandleMergingSettleMessage(r *domain.Room, cmd domain.Command) {
 			}
 		}
 
-		err = data.SetGameStatus(repository.Rdb, r.ID, dto.RoomStatusBuyStock)
+		err = data.SetGameStatus(repository.Rdb, r.ID, domain.RoomStatusBuyStock)
 		if err != nil {
 			utils.Error("设置游戏状态失败", utils.F("error", err))
 			return
 		}
-		if err := data.SetMergeSettleData(repository.Ctx, repository.Rdb, r.ID, map[string]dto.SettleData{}); err != nil {
+		if err := data.SetMergeSettleData(repository.Ctx, repository.Rdb, r.ID, map[string]domain.SettleData{}); err != nil {
 			utils.Error("保存结算数据失败", utils.F("error", err))
 			return
 		}
@@ -778,7 +777,7 @@ func HandleCreateCompanyMessage(r *domain.Room, cmd domain.Command) {
 		utils.Error("获取房间信息失败", utils.F("error", err))
 		return
 	}
-	if roomInfo.GameStatus != dto.RoomStatusCreateCompany {
+	if roomInfo.GameStatus != domain.RoomStatusCreateCompany {
 		utils.Warn("不是创建公司的状态")
 		return
 	}
@@ -806,7 +805,7 @@ func HandleCreateCompanyMessage(r *domain.Room, cmd domain.Command) {
 		return
 	}
 
-	var companyData dto.Company
+	var companyData domain.Company
 	decoderConfig := &mapstructure.DecoderConfig{
 		DecodeHook: stringToIntHookFunc(),
 		Result:     &companyData,
@@ -869,7 +868,7 @@ func HandleCreateCompanyMessage(r *domain.Room, cmd domain.Command) {
 	// Step 4: 清除 createTileKey
 	// _ = rdb.Del(repository.Ctx, createTileKey).Err()
 	// Step 5:🔥 清除玩家的 tile
-	if err := data.SetGameStatus(repository.Rdb, r.ID, dto.RoomStatusBuyStock); err != nil {
+	if err := data.SetGameStatus(repository.Rdb, r.ID, domain.RoomStatusBuyStock); err != nil {
 		utils.Error("设置房间状态失败", utils.F("room_id", r.ID), utils.F("error", err))
 	}
 }

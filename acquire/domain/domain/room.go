@@ -2,7 +2,6 @@ package domain
 
 import (
 	"encoding/json"
-	"go-game/dto"
 	"sync"
 	"time"
 )
@@ -26,14 +25,23 @@ type Command struct {
 	Conn     ReadWriteConn   `json:"-"`
 }
 
+type PlayerConn struct {
+	PlayerID     string        `json:"playerID"`
+	Conn         WriteOnlyConn `json:"-"`
+	Online       bool          `json:"online"`
+	Ready        bool          `json:"ready"`
+	AI           bool          `json:"ai"`
+	OfflineTimer *time.Timer   `json:"-"`
+}
+
 type Room struct {
-	ID        string                     `json:"roomID"`
-	OwnerID   string                     `json:"ownerID"`
-	Status    dto.RoomStatus             `json:"status"`
-	Players   map[string]*dto.PlayerConn `json:"players"`
-	PlayerSeq []string                   `json:"playerSeq"`
-	CmdCh     chan Command               `json:"-"`
-	QuitCh    chan struct{}              `json:"-"`
+	ID        string                 `json:"roomID"`
+	OwnerID   string                 `json:"ownerID"`
+	Status    RoomStatus             `json:"status"`
+	Players   map[string]*PlayerConn `json:"players"`
+	PlayerSeq []string               `json:"playerSeq"`
+	CmdCh     chan Command           `json:"-"`
+	QuitCh    chan struct{}          `json:"-"`
 
 	DeleteTimer *time.Timer `json:"-"`
 	RoomLock    sync.Mutex  `json:"-"`

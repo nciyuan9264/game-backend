@@ -3,7 +3,7 @@ package data
 import (
 	"context"
 	"fmt"
-	"go-game/dto"
+	"go-game/domain/domain"
 	"go-game/utils"
 	"strconv"
 
@@ -17,22 +17,22 @@ func SetPlayerInfoField(rdb *redis.Client, ctx context.Context, roomID, playerID
 	}
 	return nil
 }
-func GetPlayerInfoField(rdb *redis.Client, ctx context.Context, roomID, playerID, field string) (dto.PlayerInfo, error) {
+func GetPlayerInfoField(rdb *redis.Client, ctx context.Context, roomID, playerID, field string) (domain.PlayerInfo, error) {
 	playerInfoKey := fmt.Sprintf("room:%s:player:%s:info", roomID, playerID)
 	value, err := rdb.HGet(ctx, playerInfoKey, field).Result()
 	if err != nil {
-		return dto.PlayerInfo{}, err
+		return domain.PlayerInfo{}, err
 	}
 	if field == "money" {
 		intVal, convErr := strconv.Atoi(value)
 		if convErr != nil {
-			return dto.PlayerInfo{}, convErr
+			return domain.PlayerInfo{}, convErr
 		}
-		return dto.PlayerInfo{
+		return domain.PlayerInfo{
 			Money: intVal,
 		}, nil // 重新格式化输出（可选）
 	}
-	return dto.PlayerInfo{}, nil
+	return domain.PlayerInfo{}, nil
 }
 
 func AddPlayerMoney(rdb *redis.Client, ctx context.Context, roomID, playerID string, amount int) error {

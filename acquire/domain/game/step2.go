@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"go-game/domain/data"
 	"go-game/domain/domain"
-	"go-game/dto"
 	"go-game/repository"
 	"go-game/utils"
 	"strconv"
@@ -24,7 +23,7 @@ func UpdateCompanyStockAndTiles(rdb *redis.Client, roomID string, company string
 		return fmt.Errorf("获取公司数据失败: %w", err)
 	}
 
-	var companyData dto.Company
+	var companyData domain.Company
 	decoderConfig := &mapstructure.DecoderConfig{
 		DecodeHook: stringToIntHookFunc(),
 		Result:     &companyData,
@@ -126,7 +125,7 @@ func HandleBuyStockMessage(r *domain.Room, cmd domain.Command) {
 		utils.Error("获取房间信息失败", utils.F("error", err))
 		return
 	}
-	if roomInfo.GameStatus != dto.RoomStatusBuyStock {
+	if roomInfo.GameStatus != domain.RoomStatusBuyStock {
 		utils.Warn("不是 buyStock 的状态", utils.F("status", roomInfo.GameStatus))
 		return
 	}
@@ -178,7 +177,7 @@ func HandleBuyStockMessage(r *domain.Room, cmd domain.Command) {
 		utils.Error("切换玩家失败", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("error", err))
 	}
 	// 最后设置房间状态为 setTile
-	err = data.SetGameStatus(repository.Rdb, r.ID, dto.RoomStatusSetTile)
+	err = data.SetGameStatus(repository.Rdb, r.ID, domain.RoomStatusSetTile)
 	if err != nil {
 		utils.Error("设置房间状态失败", utils.F("room_id", r.ID), utils.F("error", err))
 	}

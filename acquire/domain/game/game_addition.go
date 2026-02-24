@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"go-game/domain/data"
 	"go-game/domain/domain"
-	"go-game/dto"
 	"go-game/repository"
 	"go-game/utils"
 	"math/rand/v2"
@@ -111,7 +110,7 @@ func HandleRestartGameMessage(r *domain.Room, cmd domain.Command) {
 		return
 	}
 	// 重置游戏状态
-	r.Status = dto.RoomStatusMatch
+	r.Status = domain.RoomStatusMatch
 	// 重置tiles
 	tile, err := data.GetAllRoomTiles(repository.Rdb, r.ID)
 	if err != nil {

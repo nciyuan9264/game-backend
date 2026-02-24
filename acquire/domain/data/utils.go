@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-game/domain/domain"
-	"go-game/dto"
 	"go-game/repository"
 	"log"
 )
@@ -34,7 +33,7 @@ func GenerateAvailableTiles(room *domain.Room) ([]string, error) {
 
 	var available []string
 	for tileID, value := range tileMap {
-		var tileInfo dto.Tile
+		var tileInfo domain.Tile
 		err := json.Unmarshal([]byte(value), &tileInfo)
 		if err != nil {
 			continue

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"go-game/domain/data"
 	"go-game/domain/domain"
-	"go-game/dto"
 	"go-game/entities"
 	"go-game/repository"
 	"go-game/utils"
@@ -102,7 +101,7 @@ func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[
 }
 
 // 向该客户端发送同步消息
-func SyncRoomMessage(conn dto.ConnInterface, room *domain.Room, pc *dto.PlayerConn, result map[string]int) error {
+func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.PlayerConn, result map[string]int) error {
 	rdb := repository.Rdb
 	ctx := repository.Ctx
 
@@ -229,7 +228,7 @@ func SyncRoomMessage(conn dto.ConnInterface, room *domain.Room, pc *dto.PlayerCo
 	return conn.WriteMessage(websocket.TextMessage, data)
 }
 
-func SyncMatchMessage(conn dto.ConnInterface, room *domain.Room, pc *dto.PlayerConn, snapshot *domain.Room) error {
+func SyncMatchMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.PlayerConn, snapshot *domain.Room) error {
 	playersInfo := make([]map[string]interface{}, 0)
 	for _, p := range room.Players {
 		playersInfo = append(playersInfo, map[string]interface{}{
@@ -317,8 +316,8 @@ func BroadcastToRoom(room *domain.Room) {
 		if err != nil {
 			utils.Error("获取房间信息失败", utils.F("room_id", room.ID), utils.F("error", err))
 			return
-		} else if roomInfo.GameStatus != dto.RoomStatusEnd {
-			err = data.SetGameStatus(repository.Rdb, room.ID, dto.RoomStatusEnd)
+		} else if roomInfo.GameStatus != domain.RoomStatusEnd {
+			err = data.SetGameStatus(repository.Rdb, room.ID, domain.RoomStatusEnd)
 			if err != nil {
 				utils.Error("设置房间状态为 end 失败", utils.F("room_id", room.ID), utils.F("error", err))
 			}
@@ -387,7 +386,7 @@ func BroadcastToRoom(room *domain.Room) {
 
 func SnapshotRoom(r *domain.Room) *domain.Room {
 	copyRoom := *r
-	copyRoom.Players = make(map[string]*dto.PlayerConn)
+	copyRoom.Players = make(map[string]*domain.PlayerConn)
 
 	for _, p := range r.Players {
 		cp := *p

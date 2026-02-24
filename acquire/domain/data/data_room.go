@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"go-game/domain/domain"
-	"go-game/dto"
 	"go-game/entities"
 	"go-game/repository"
 	"go-game/utils"
@@ -42,7 +41,7 @@ func GetRoomInfo(rdb *redis.Client, roomID string) (*entities.RoomInfo, error) {
 		return nil, fmt.Errorf("roomStatus 字段解析失败: %w", err)
 	}
 	roomInfo.RoomStatus = roomStatus
-	roomInfo.GameStatus = dto.RoomStatus(roomInfoMap["gameStatus"])
+	roomInfo.GameStatus = domain.RoomStatus(roomInfoMap["gameStatus"])
 	roomInfo.OwnerID = roomInfoMap["ownerID"]
 	// 字符串转 int
 	maxPlayersStr := roomInfoMap["maxPlayers"]
@@ -76,7 +75,7 @@ func SetRoomInfo(rdb *redis.Client, ctx context.Context, roomID string, info ent
 	return nil
 }
 
-func SetGameStatus(rdb *redis.Client, roomID string, status dto.RoomStatus) error {
+func SetGameStatus(rdb *redis.Client, roomID string, status domain.RoomStatus) error {
 	roomInfoKey := fmt.Sprintf("room:%s:roomInfo", roomID)
 	err := rdb.HSet(repository.Ctx, roomInfoKey, "gameStatus", string(status)).Err()
 	if err != nil {

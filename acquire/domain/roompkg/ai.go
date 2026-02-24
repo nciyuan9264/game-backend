@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"go-game/domain/data"
 	"go-game/domain/domain"
-	"go-game/dto"
 	"go-game/repository"
 	"go-game/utils"
 	"sort"
@@ -163,7 +162,7 @@ func chooseStocksToBuyForAI(roomID, playerID string) map[string]int {
 	return result
 }
 
-func chooseMergingSettleForAI(roomID, playerID string) []dto.MergingSettleItem {
+func chooseMergingSettleForAI(roomID, playerID string) []domain.MergingSettleItem {
 	playerData, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, playerID)
 	if err != nil {
 		utils.Error("获取玩家股票信息失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
@@ -188,7 +187,7 @@ func chooseMergingSettleForAI(roomID, playerID string) []dto.MergingSettleItem {
 		return nil
 	}
 
-	result := []dto.MergingSettleItem{}
+	result := []domain.MergingSettleItem{}
 
 	for companyKey := range mergeSettleData {
 		count := playerData[companyKey]
@@ -216,7 +215,7 @@ func chooseMergingSettleForAI(roomID, playerID string) []dto.MergingSettleItem {
 			sellAmount = count - exchangeAmount
 		}
 
-		result = append(result, dto.MergingSettleItem{
+		result = append(result, domain.MergingSettleItem{
 			Company:        companyKey,
 			SellAmount:     sellAmount,
 			ExchangeAmount: exchangeAmount,
@@ -282,14 +281,14 @@ func MaybeRunAIIfNeeded(room *domain.Room, message []byte) bool {
 	if !ok || gameStatusStr == "" {
 		return false
 	}
-	gameStatus := dto.RoomStatus(gameStatusStr)
+	gameStatus := domain.RoomStatus(gameStatusStr)
 
 	playerId, ok := msg["playerId"].(string)
-	if !ok || playerId == "" || (playerId != currentPlayerID && gameStatus != dto.RoomStatusMergingSettle) {
+	if !ok || playerId == "" || (playerId != currentPlayerID && gameStatus != domain.RoomStatusMergingSettle) {
 		return false
 	}
 	// 判断是否是 AI 玩家
-	if gameStatus != dto.RoomStatusMergingSettle {
+	if gameStatus != domain.RoomStatusMergingSettle {
 		isAI := false
 
 		if room.Players[currentPlayerID].AI {
@@ -326,7 +325,7 @@ func MaybeRunAIIfNeeded(room *domain.Room, message []byte) bool {
 	}
 
 	// mergingSettle 特殊校验
-	if gameStatus == dto.RoomStatusMergingSettle {
+	if gameStatus == domain.RoomStatusMergingSettle {
 		mergeSettleData, err := data.GetMergeSettleData(repository.Ctx, repository.Rdb, room.ID)
 		if err != nil {
 			utils.Error("获取合并数据失败", utils.F("room_id", room.ID), utils.F("player_id", playerId), utils.F("error", err))

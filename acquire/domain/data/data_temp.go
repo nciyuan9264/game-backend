@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"go-game/dto"
+	"go-game/domain/domain"
 	"go-game/entities"
 
 	"github.com/go-redis/redis/v8"
 )
 
-func SetMergeSettleData(ctx context.Context, rdb *redis.Client, roomID string, data map[string]dto.SettleData) error {
+func SetMergeSettleData(ctx context.Context, rdb *redis.Client, roomID string, data map[string]domain.SettleData) error {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("序列化 SettleData map 失败: %w", err)
@@ -23,18 +23,18 @@ func SetMergeSettleData(ctx context.Context, rdb *redis.Client, roomID string, d
 	return nil
 }
 
-func GetMergeSettleData(ctx context.Context, rdb *redis.Client, roomID string) (map[string]dto.SettleData, error) {
+func GetMergeSettleData(ctx context.Context, rdb *redis.Client, roomID string) (map[string]domain.SettleData, error) {
 	key := fmt.Sprintf("room:%s:merge_settle_temp", roomID)
 
 	result, err := rdb.Get(ctx, key).Result()
 	if err != nil {
 		if err == redis.Nil {
-			return map[string]dto.SettleData{}, nil
+			return map[string]domain.SettleData{}, nil
 		}
 		return nil, fmt.Errorf("从 Redis 获取数据失败: %w", err)
 	}
 
-	var data map[string]dto.SettleData
+	var data map[string]domain.SettleData
 	if err := json.Unmarshal([]byte(result), &data); err != nil {
 		return nil, fmt.Errorf("反序列化 SettleData map 失败: %w", err)
 	}

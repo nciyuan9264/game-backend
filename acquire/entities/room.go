@@ -1,6 +1,6 @@
 package entities
 
-import "go-game/dto"
+import "go-game/domain/domain"
 
 type CompanyInfo struct {
 	Name       string `json:"name"`
@@ -15,8 +15,8 @@ type MergingSelection struct {
 }
 
 type RoomInfo struct {
-	RoomStatus bool           `json:"roomStatus"`
-	GameStatus dto.RoomStatus `json:"gameStatus"`
-	MaxPlayers int            `json:"maxPlayers"`
-	OwnerID    string         `json:"ownerID"`
+	RoomStatus bool              `json:"roomStatus"`
+	GameStatus domain.RoomStatus `json:"gameStatus"`
+	MaxPlayers int               `json:"maxPlayers"`
+	OwnerID    string            `json:"ownerID"`
 }
