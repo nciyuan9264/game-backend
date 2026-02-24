@@ -44,6 +44,17 @@ const MaxPlayers = 6
 var Rooms = map[string]*RoomService{}
 var RoomLock sync.Mutex
 
+func GetAllRoomsSnapshot() map[string]*RoomService {
+	RoomLock.Lock()
+	defer RoomLock.Unlock()
+
+	copied := make(map[string]*RoomService)
+	for k, v := range Rooms {
+		copied[k] = v
+	}
+	return copied
+}
+
 // handleCommand 处理房间命令
 func (r *RoomService) handleCommand(cmd domain.Command) {
 	switch cmd.Type {

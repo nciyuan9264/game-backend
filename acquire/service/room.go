@@ -1,11 +1,11 @@
 package service
 
 import (
-	"fmt"
 	"go-game/domain/data"
 	"go-game/domain/roompkg"
 	"go-game/dto"
 	"go-game/repository"
+	"go-game/utils"
 	"time"
 )
 
@@ -21,167 +21,14 @@ func CreateRoom(userID string) (string, error) {
 
 	go newRoom.Run()
 
-	fmt.Println("newRoom created:", roomID)
+	utils.Info("房间已创建", utils.F("roomID", roomID))
 	return roomID, nil
 }
 
-// func CreateRoom(userID string) (string, error) {
-// 	ctx := repository.Ctx
-// 	rdb := repository.Rdb
-
-// 	// 简洁的时间前缀：月日_时分秒
-// 	timePrefix := time.Now().Format("0102_150405")
-// 	// 生成 4 位随机码
-// 	randomSuffix := RandString(4)
-// 	// roomID 示例：0620_153045_dA9X
-// 	roomID := fmt.Sprintf("%s_%s", timePrefix, randomSuffix)
-
-// 	// 初始化房间信息
-// 	err := room.SetRoomInfo(rdb, repository.Ctx, roomID, entities.RoomInfo{
-// 		MaxPlayers: params.MaxPlayers,
-// 		GameStatus: dto.RoomStatusSetTile,
-// 		RoomStatus: false,
-// 		UserID:     params.UserID,
-// 	})
-// 	if err != nil {
-// 		return "", fmt.Errorf("初始化房间信息失败: %w", err)
-// 	}
-
-// 	companyData := map[string]map[string]interface{}{
-// 		"Sackson": {
-// 			"name":       "Sackson",
-// 			"stockTotal": 25,
-// 			"tiles":      0,   // 初始数量
-// 			"stockPrice": 200, // 初始参考股价（可调整）
-// 		},
-// 		"Tower": {
-// 			"name":       "Tower",
-// 			"tiles":      0, // 初始数量
-// 			"stockTotal": 25,
-// 			"stockPrice": 200,
-// 		},
-// 		"American": {
-// 			"name":       "American",
-// 			"tiles":      0, // 初始数量
-// 			"stockTotal": 25,
-// 			"stockPrice": 200,
-// 		},
-// 		"Festival": {
-// 			"name":       "Festival",
-// 			"tiles":      0, // 初始数量
-// 			"stockTotal": 25,
-// 			"stockPrice": 200,
-// 		},
-// 		"Worldwide": {
-// 			"name":       "Worldwide",
-// 			"tiles":      0, // 初始数量
-// 			"stockTotal": 25,
-// 			"stockPrice": 200,
-// 		},
-// 		"Continental": {
-// 			"name":       "Continental",
-// 			"tiles":      0, // 初始数量
-// 			"stockTotal": 25,
-// 			"stockPrice": 200,
-// 		},
-// 		"Imperial": {
-// 			"name":       "Imperial",
-// 			"tiles":      0, // 初始数量
-// 			"stockTotal": 25,
-// 			"stockPrice": 200,
-// 		},
-// 	}
-
-// 	for id, data := range companyData {
-// 		companyKey := fmt.Sprintf("room:%s:company:%s", roomID, id)
-// 		if _, err := rdb.HSet(ctx, companyKey, data).Result(); err != nil {
-// 			return "", fmt.Errorf("初始化公司[%s]失败: %w", id, err)
-// 		}
-// 		rdb.SAdd(ctx, fmt.Sprintf("room:%s:company_ids", roomID), id)
-// 	}
-
-// 	tileKey := fmt.Sprintf("room:%s:tiles", roomID)
-// 	pipe := rdb.Pipeline()
-
-// 	for col := 1; col <= 12; col++ {
-// 		for row := 'A'; row <= 'I'; row++ {
-// 			id := fmt.Sprintf("%d%c", col, row)
-// 			tile := dto.Tile{
-// 				ID:     id,
-// 				Belong: "",
-// 			}
-// 			tileJSON, err := json.Marshal(tile)
-// 			if err != nil {
-// 				return "", fmt.Errorf("tile %s 序列化失败: %w", id, err)
-// 			}
-// 			pipe.HSet(ctx, tileKey, id, tileJSON)
-// 		}
-// 	}
-
-// 	_, err = pipe.Exec(ctx)
-// 	if err != nil {
-// 		return "", fmt.Errorf("tile 初始化 Redis 写入失败: %w", err)
-// 	}
-// 	room.Rooms[roomID] = []dto.PlayerConn{}
-
-// 	for i := 1; i <= params.AiCount; i++ {
-// 		player.JoinRoomAsAI(roomID, fmt.Sprintf("ai_%03d", i))
-// 	}
-
-// 	// if params.AiCount > 0 {
-// 	// 	ws.JoinRoomAsAI(roomID, "ai_001")
-// 	// ws.JoinRoomAsAI(roomID, "ai_002")
-// 	// err := ws.SetCurrentPlayer(repository.Rdb, repository.Ctx, roomID, "ai_001")
-// 	// if err != nil {
-// 	// 	log.Println("❌ 设置当前玩家失败:", err)
-// 	// }
-// 	// err = ws.SetRoomStatus(repository.Rdb, roomID, true)
-// 	// if err != nil {
-// 	// 	log.Println("❌ 设置房间状态失败:", err)
-// 	// }
-// 	// ws.BroadcastToRoom(roomID)
-// 	// }
-// 	return roomID, nil
-// }
-
-// func DeleteRoom(params dto.DeleteRoomRequest) error {
-// 	ctx := repository.Ctx
-// 	rdb := repository.Rdb
-
-// 	// 用 SCAN 查找所有以 room:{RoomID}: 开头的 key
-// 	prefix := fmt.Sprintf("room:%s:", params.RoomID)
-// 	var cursor uint64
-// 	var keysToDelete []string
-
-// 	for {
-// 		keys, cur, err := rdb.Scan(ctx, cursor, prefix+"*", 100).Result()
-// 		if err != nil {
-// 			return fmt.Errorf("扫描房间相关 key 失败: %w", err)
-// 		}
-// 		keysToDelete = append(keysToDelete, keys...)
-// 		cursor = cur
-// 		if cursor == 0 {
-// 			break
-// 		}
-// 	}
-
-// 	if len(keysToDelete) == 0 {
-// 		return fmt.Errorf("房间不存在或无相关数据")
-// 	}
-
-// 	// 批量删除这些 key
-// 	if _, err := rdb.Del(ctx, keysToDelete...).Result(); err != nil {
-// 		return fmt.Errorf("删除房间相关 key 失败: %w", err)
-// 	}
-// 	delete(room.Rooms, params.RoomID)
-
-// 	return nil
-// }
-
 func GetRoomList() ([]dto.RoomInfo, error) {
-	// rdb := repository.Rdb
 	var rooms []dto.RoomInfo
-	for roomID, roomConnInfo := range roompkg.Rooms {
+	roomConnInfos := roompkg.GetAllRoomsSnapshot()
+	for roomID, roomConnInfo := range roomConnInfos {
 		roomPlayers := make([]dto.RoomPlayer, 0, len(roomConnInfo.Room.Players))
 		for _, player := range roomConnInfo.Room.Players {
 			roomPlayers = append(roomPlayers, dto.RoomPlayer{
@@ -193,7 +40,8 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 		}
 		tiles, err := data.GetAllRoomTiles(repository.Rdb, roomID)
 		if err != nil {
-			return nil, fmt.Errorf("获取房间列表失败: %w", err)
+			utils.Error("获取房间所有瓦片失败", utils.F("room_id", roomID), utils.F("error", err))
+			continue
 		}
 
 		emptyTileCount := 0

@@ -1,10 +1,9 @@
-// redis.go
 package repository
 
 import (
 	"context"
 	"fmt"
-	"log"
+	"go-game/utils"
 	"os"
 
 	"github.com/go-redis/redis/v8"
@@ -32,7 +31,7 @@ func InitRedis() {
 
 	_, err := Rdb.Ping(Ctx).Result()
 	if err != nil {
-		log.Fatalf("Redis 连接失败: %v", err)
+		utils.Info("Redis 连接失败: %v", utils.F("error", err))
 	}
-	log.Println("✅ Redis 连接成功")
+	utils.Info("✅ Redis 连接成功")
 }

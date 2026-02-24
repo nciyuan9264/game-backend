@@ -338,7 +338,12 @@ func BroadcastToRoom(room *domain.Room) {
 	}
 
 	for companyName, info := range companyInfoMap {
-		stockInfo := utils.GetStockInfo(companyName, allTileMap[companyName])
+		company, ok := utils.ParseCompanyType(companyName)
+		if !ok {
+			continue // 或报错
+		}
+
+		stockInfo := utils.GetStockInfo(company, allTileMap[companyName])
 		stockLeft := 25 - allStockMap[companyName]
 		info.StockTotal = stockLeft
 		info.Tiles = allTileMap[companyName]

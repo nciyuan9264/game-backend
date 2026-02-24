@@ -89,7 +89,12 @@ func handleMergeProcess(
 			currentCompanyHoders = append(currentCompanyHoders, holder.PlayerID)
 		}
 
-		stockInfo := utils.GetStockInfo(mainHotel, tileCount)
+		company, ok := utils.ParseCompanyType(mainHotel)
+		if !ok {
+			return nil // 或报错
+		}
+
+		stockInfo := utils.GetStockInfo(company, tileCount)
 		firstBonus := stockInfo.BonusFirst
 		secondBonus := stockInfo.BonusSecond
 
