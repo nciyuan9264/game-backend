@@ -62,7 +62,7 @@ func HandleWebSocket(c *gin.Context) {
 	}
 
 	// 创建 RealConn 实例
-	realConn := &domain.RealConn{Conn: conn}
+	realConn := domain.NewRealConn(conn)
 
 	// 1️⃣ 解析参数（保持不变）
 	roomID := c.Query("roomID")
