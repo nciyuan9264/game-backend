@@ -22,3 +22,12 @@ func RemoveAtIndex(slice []string, index int) []string {
 	}
 	return append(slice[:index], slice[index+1:]...)
 }
+
+func SafeSliceRemove(slice []string, target string) []string {
+	for i, item := range slice {
+		if item == target {
+			return append(slice[:i], slice[i+1:]...)
+		}
+	}
+	return slice // 未找到则返回原 slice
+}

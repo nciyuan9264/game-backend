@@ -1,10 +1,8 @@
 package service
 
 import (
-	"go-game/domain/data"
 	"go-game/domain/roompkg"
 	"go-game/dto"
-	"go-game/repository"
 	"go-game/utils"
 	"time"
 )
@@ -29,8 +27,8 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 	var rooms []dto.RoomInfo
 	roomConnInfos := roompkg.GetAllRoomsSnapshot()
 	for roomID, roomConnInfo := range roomConnInfos {
-		roomPlayers := make([]dto.RoomPlayer, 0, len(roomConnInfo.Room.Players))
-		for _, player := range roomConnInfo.Room.Players {
+		roomPlayers := make([]dto.RoomPlayer, 0, len(roomConnInfo.Room.Connections))
+		for _, player := range roomConnInfo.Room.Connections {
 			roomPlayers = append(roomPlayers, dto.RoomPlayer{
 				PlayerID: player.PlayerID,
 				Online:   player.Online,
@@ -38,12 +36,8 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 				Ready:    player.Ready,
 			})
 		}
-		tiles, err := data.GetAllRoomTiles(repository.Rdb, roomID)
-		if err != nil {
-			utils.Error("获取房间所有瓦片失败", utils.F("room_id", roomID), utils.F("error", err))
-			continue
-		}
 
+		tiles := roomConnInfo.Room.State.BoardTiles
 		emptyTileCount := 0
 		for _, tile := range tiles {
 			if tile.Belong == "" {
@@ -53,8 +47,8 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 
 		room := dto.RoomInfo{
 			RoomID:         roomID,
-			OwnerID:        roomConnInfo.Room.OwnerID,
-			Status:         roomConnInfo.Room.Status,
+			OwnerID:        roomConnInfo.Room.State.OwnerID,
+			Status:         roomConnInfo.Room.State.RoomStatus,
 			RoomPlayer:     roomPlayers,
 			EmptyTileCount: emptyTileCount,
 		}
@@ -62,4 +56,13 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 	}
 
 	return rooms, nil
+}
+
+func GetGameStatus(roomID string) *roompkg.RoomService {
+	roomConnInfo, exists := roompkg.Rooms[roomID]
+	if !exists {
+		utils.Error("房间不存在", utils.F("room_id", roomID))
+	}
+
+	return roomConnInfo
 }

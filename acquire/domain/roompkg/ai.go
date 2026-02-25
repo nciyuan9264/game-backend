@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"go-game/domain/data"
 	"go-game/domain/domain"
-	"go-game/repository"
 	"go-game/utils"
 	"sort"
 	"time"
@@ -33,17 +32,9 @@ func (v *VirtualConn) Close() error {
 	return nil
 }
 
-func chooseTileForAI(roomID, playerID string) string {
-	tiles, err := data.GetPlayerTiles(repository.Rdb, repository.Ctx, roomID, playerID)
-	if err != nil || len(tiles) == 0 {
-		return ""
-	}
-
-	allTiles, err := data.GetAllRoomTiles(repository.Rdb, roomID)
-	if err != nil {
-		utils.Error("获取所有房间瓦片失败", utils.F("room_id", roomID), utils.F("error", err))
-		return ""
-	}
+func chooseTileForAI(room *domain.Room, playerID string) string {
+	tiles := room.State.Players[playerID].Tiles
+	allTiles := room.State.BoardTiles
 
 	// 遍历 AI 玩家拥有的 tiles
 	for _, tileID := range tiles {
@@ -58,15 +49,10 @@ func chooseTileForAI(roomID, playerID string) string {
 	return tiles[rand.IntN(len(tiles))]
 }
 
-func chooseCompanyForAI(roomID string) string {
-	companyInfo, err := data.GetCompanyInfo(repository.Rdb, roomID)
-	if err != nil {
-		utils.Error("获取公司信息失败", utils.F("room_id", roomID), utils.F("error", err))
-		return ""
-	}
+func chooseCompanyForAI(r *domain.Room) string {
 	// 过滤掉已创建的公司
 	var uncreated []string
-	for company, info := range companyInfo {
+	for company, info := range r.State.Companies {
 		if info.Tiles == 0 {
 			uncreated = append(uncreated, company)
 		}
@@ -97,24 +83,10 @@ func chooseCompanyForAI(roomID string) string {
 	return p3[rand.IntN(len(p3))]
 }
 
-func chooseStocksToBuyForAI(roomID, playerID string) map[string]int {
-	companyInfo, err := data.GetCompanyInfo(repository.Rdb, roomID)
-	if err != nil {
-		utils.Error("获取公司信息失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
-		return nil
-	}
-	playerInfo, err := data.GetPlayerInfoField(repository.Rdb, repository.Ctx, roomID, playerID, "money")
-	if err != nil {
-		utils.Error("获取玩家信息失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
-		return nil
-	}
+func chooseStocksToBuyForAI(r *domain.Room, playerID string) map[string]int {
+	playerInfo := r.State.Players[playerID]
 	money := playerInfo.Money
-
-	playerStock, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, playerID)
-	if err != nil {
-		utils.Error("获取玩家股票失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
-		return nil
-	}
+	playerStock := playerInfo.Stocks
 
 	// 收集可购买的公司（已创建，且有库存，且价格不超过总金额）
 	type candidate struct {
@@ -123,7 +95,7 @@ func chooseStocksToBuyForAI(roomID, playerID string) map[string]int {
 		Remain int
 	}
 	var options []candidate
-	for name, info := range companyInfo {
+	for name, info := range r.State.Companies {
 		if info.Tiles > 0 && info.StockPrice <= money && info.StockTotal > 0 && playerStock[name] < 13 {
 			options = append(options, candidate{
 				Name:   name,
@@ -162,40 +134,16 @@ func chooseStocksToBuyForAI(roomID, playerID string) map[string]int {
 	return result
 }
 
-func chooseMergingSettleForAI(roomID, playerID string) []domain.MergingSettleItem {
-	playerData, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, playerID)
-	if err != nil {
-		utils.Error("获取玩家股票信息失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
-		return nil
-	}
-
-	mergeSettleData, err := data.GetMergeSettleData(repository.Ctx, repository.Rdb, roomID)
-	if err != nil {
-		utils.Error("获取合并数据失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
-		return nil
-	}
-
-	mainCompany, err := data.GetMergeMainCompany(repository.Rdb, repository.Ctx, roomID)
-	if err != nil {
-		utils.Error("获取合并主公司失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
-		return nil
-	}
-
-	companyInfo, err := data.GetCompanyInfo(repository.Rdb, roomID)
-	if err != nil {
-		utils.Error("获取公司信息失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
-		return nil
-	}
-
+func chooseMergingSettleForAI(r *domain.Room, playerID string) []domain.MergingSettleItem {
 	result := []domain.MergingSettleItem{}
 
-	for companyKey := range mergeSettleData {
-		count := playerData[companyKey]
+	for companyKey := range r.State.MergeSettleData {
+		count := r.State.Players[playerID].Stocks[companyKey]
 		if count == 0 {
 			continue
 		}
-		mainCompanyInfo := companyInfo[mainCompany]
-		company := companyInfo[companyKey]
+		mainCompanyInfo := r.State.Companies[r.State.MergeMainCompany]
+		company := r.State.Companies[companyKey]
 
 		exchangeAmount := 0
 		sellAmount := count
@@ -225,26 +173,15 @@ func chooseMergingSettleForAI(roomID, playerID string) []domain.MergingSettleIte
 	return result
 }
 
-func chooseMergingSelectionForAI(roomID, playerID string, mainCompany []string) string {
-	companyInfo, err := data.GetCompanyInfo(repository.Rdb, roomID)
-	if err != nil {
-		utils.Error("获取公司信息失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
-		return ""
-	}
-
-	playerStocks, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, roomID, playerID)
-	if err != nil {
-		utils.Error("获取玩家股票信息失败", utils.F("room_id", roomID), utils.F("player_id", playerID), utils.F("error", err))
-		return ""
-	}
+func chooseMergingSelectionForAI(r *domain.Room, playerID string, mainCompany []string) string {
 	res := ""
 	max := -1
 	for _, companyKey := range mainCompany {
-		stockInUse := 25 - companyInfo[companyKey].StockTotal
+		stockInUse := 25 - r.State.Companies[companyKey].StockTotal
 		if stockInUse == 0 {
 			continue // 避免除以 0
 		}
-		num := playerStocks[companyKey] / stockInUse
+		num := r.State.Players[playerID].Stocks[companyKey] / stockInUse
 		if num > max {
 			max = num
 			res = companyKey
@@ -254,10 +191,10 @@ func chooseMergingSelectionForAI(roomID, playerID string, mainCompany []string) 
 	return res
 }
 
-func MaybeRunAIIfNeeded(room *domain.Room, message []byte) bool {
+func MaybeRunAIIfNeeded(r *domain.Room, message []byte) bool {
 	var msg map[string]interface{}
 	if err := json.Unmarshal(message, &msg); err != nil {
-		utils.Error("AI 消息格式错误", utils.F("room_id", room.ID), utils.F("error", err))
+		utils.Error("AI 消息格式错误", utils.F("room_id", r.ID), utils.F("error", err))
 		return false
 	}
 
@@ -277,7 +214,7 @@ func MaybeRunAIIfNeeded(room *domain.Room, message []byte) bool {
 		return false
 	}
 
-	gameStatusStr, ok := roomInfo["gameStatus"].(string)
+	gameStatusStr, ok := roomInfo["roomStatus"].(string)
 	if !ok || gameStatusStr == "" {
 		return false
 	}
@@ -291,14 +228,13 @@ func MaybeRunAIIfNeeded(room *domain.Room, message []byte) bool {
 	if gameStatus != domain.RoomStatusMergingSettle {
 		isAI := false
 
-		if room.Players[currentPlayerID].AI {
+		if r.Connections[currentPlayerID].AI {
 			isAI = true
-			utils.Info("检测到被替换为AI的玩家", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID))
+			utils.Info("检测到被替换为AI的玩家", utils.F("room_id", r.ID), utils.F("player_id", currentPlayerID))
 		}
 
-		utils.Info("当前玩家 %s 不是 AI 玩家", utils.F("player_id", currentPlayerID))
-
 		if !isAI {
+			utils.Info("当前玩家 %s 不是 AI 玩家", utils.F("player_id", currentPlayerID))
 			return false
 		}
 	}
@@ -306,7 +242,7 @@ func MaybeRunAIIfNeeded(room *domain.Room, message []byte) bool {
 	// 提取临时数据（合并选择）
 	tempData, ok := msg["tempData"].(map[string]interface{})
 	if !ok {
-		utils.Error("tempData 类型错误", utils.F("room_id", room.ID))
+		utils.Error("tempData 类型错误", utils.F("room_id", r.ID))
 		return false
 	}
 
@@ -326,11 +262,7 @@ func MaybeRunAIIfNeeded(room *domain.Room, message []byte) bool {
 
 	// mergingSettle 特殊校验
 	if gameStatus == domain.RoomStatusMergingSettle {
-		mergeSettleData, err := data.GetMergeSettleData(repository.Ctx, repository.Rdb, room.ID)
-		if err != nil {
-			utils.Error("获取合并数据失败", utils.F("room_id", room.ID), utils.F("player_id", playerId), utils.F("error", err))
-			return false
-		}
+		mergeSettleData := r.State.MergeSettleData
 
 		// 仅当玩家在合并对象中时才进行 AI 操作
 		playerInHoder := false
@@ -344,83 +276,76 @@ func MaybeRunAIIfNeeded(room *domain.Room, message []byte) bool {
 			}
 		}
 		if !playerInHoder {
-			utils.Error("外层校验玩家不在任何合并中", utils.F("room_id", room.ID), utils.F("player_id", playerId))
+			utils.Warn("外层校验玩家不在任何合并中", utils.F("room_id", r.ID), utils.F("player_id", playerId))
 			return false
 		}
 	}
-
-	allTile, err := data.GetAllRoomTiles(repository.Rdb, room.ID)
-	if err != nil {
-		utils.Error("获取所有 tile 失败", utils.F("room_id", room.ID), utils.F("player_id", playerId), utils.F("error", err))
-		return false
-	}
+	tiles := r.State.BoardTiles
 	isAllTileUsed := true
-	for _, tile := range allTile {
+	for _, tile := range tiles {
 		if tile.Belong == "" {
 			isAllTileUsed = false
 		}
 	}
 	if isAllTileUsed {
-		utils.Error("所有 tile 已被使用", utils.F("room_id", room.ID), utils.F("player_id", playerId))
-		// time.Sleep(3 * time.Second)
-		// SetGameStatus(repository.Rdb, roomID, dto.RoomStatusEnd)
+		utils.Error("所有 tile 已被使用", utils.F("room_id", r.ID), utils.F("player_id", playerId))
 	}
 
-	utils.Info("当前是 AI 玩家的回合，准备延迟执行 AI 行动", utils.F("room_id", room.ID), utils.F("player_id", playerId), utils.F("game_status", gameStatus))
+	utils.Info("当前是 AI 玩家的回合，准备延迟执行 AI 行动", utils.F("room_id", r.ID), utils.F("player_id", playerId), utils.F("game_status", gameStatus))
 
 	// ---------- 在协程中延迟执行 ----------
 	go func() {
 		time.Sleep(5 * time.Second)
 
-		conn := &VirtualConn{Room: room}
+		conn := &VirtualConn{Room: r}
 		var aiMsg map[string]interface{}
 
 		switch gameStatus {
 		case "setTile":
-			tile := chooseTileForAI(room.ID, currentPlayerID)
+			tile := chooseTileForAI(r, currentPlayerID)
 			if tile == "" {
-				utils.Error("AI 未选择有效 tile", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID))
+				utils.Error("AI 未选择有效 tile", utils.F("room_id", r.ID), utils.F("player_id", currentPlayerID))
 				return
 			}
-			utils.Info("AI 选择 tile", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID), utils.F("tile", tile))
+			utils.Info("AI 选择 tile", utils.F("room_id", r.ID), utils.F("player_id", currentPlayerID), utils.F("tile", tile))
 			aiMsg = map[string]interface{}{
 				"type":    "game_place_tile",
 				"payload": map[string]interface{}{"tileKey": tile},
 			}
 		case "createCompany":
-			company := chooseCompanyForAI(room.ID)
+			company := chooseCompanyForAI(r)
 			if company == "" {
-				utils.Error("AI 未选择有效公司", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID))
+				utils.Error("AI 未选择有效公司", utils.F("room_id", r.ID), utils.F("player_id", currentPlayerID))
 				return
 			}
-			utils.Info("AI 选择公司", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID), utils.F("company", company))
+			utils.Info("AI 选择公司", utils.F("room_id", r.ID), utils.F("player_id", currentPlayerID), utils.F("company", company))
 			aiMsg = map[string]interface{}{
 				"type":    "game_create_company",
 				"payload": map[string]interface{}{"company": company},
 			}
 		case "buyStock":
-			stocks := chooseStocksToBuyForAI(room.ID, currentPlayerID)
-			utils.Info("AI 选择购买股票", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID), utils.F("stocks", stocks))
+			stocks := chooseStocksToBuyForAI(r, currentPlayerID)
+			utils.Info("AI 选择购买股票", utils.F("room_id", r.ID), utils.F("player_id", currentPlayerID), utils.F("stocks", stocks))
 			aiMsg = map[string]interface{}{
 				"type":    "game_buy_stock",
 				"payload": map[string]interface{}{"stocks": stocks},
 			}
 		case "mergingSelection":
-			selection := chooseMergingSelectionForAI(room.ID, currentPlayerID, mainCompany)
-			utils.Info("AI 选择合并公司", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID), utils.F("selection", selection))
+			selection := chooseMergingSelectionForAI(r, currentPlayerID, mainCompany)
+			utils.Info("AI 选择合并公司", utils.F("room_id", r.ID), utils.F("player_id", currentPlayerID), utils.F("selection", selection))
 			aiMsg = map[string]interface{}{
 				"type":    "game_merging_selection",
 				"payload": map[string]interface{}{"mainCompany": selection},
 			}
 		case "mergingSettle":
-			settle := chooseMergingSettleForAI(room.ID, playerId)
-			utils.Info("AI 选择合并结算", utils.F("room_id", room.ID), utils.F("player_id", playerId), utils.F("settle", settle))
+			settle := chooseMergingSettleForAI(r, playerId)
+			utils.Info("AI 选择合并结算", utils.F("room_id", r.ID), utils.F("player_id", playerId), utils.F("settle", settle))
 			aiMsg = map[string]interface{}{
 				"type":    "game_merging_settle",
 				"payload": map[string]interface{}{"actions": settle},
 			}
 		default:
-			utils.Warn("当前状态未定义 AI 行为", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID), utils.F("game_status", gameStatus))
+			utils.Warn("当前状态未定义 AI 行为", utils.F("room_id", r.ID), utils.F("player_id", currentPlayerID), utils.F("game_status", gameStatus))
 			return
 		}
 
@@ -428,20 +353,18 @@ func MaybeRunAIIfNeeded(room *domain.Room, message []byte) bool {
 		// 将 AI 消息转换为 Command 格式，和玩家一样通过通道传递
 		payload, err := json.Marshal(aiMsg["payload"])
 		if err != nil {
-			utils.Error("AI 消息序列化失败", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID), utils.F("error", err))
+			utils.Error("AI 消息序列化失败", utils.F("room_id", r.ID), utils.F("player_id", currentPlayerID), utils.F("error", err))
 			return
 		}
-		utils.Info("AI 发送消息", utils.F("room_id", room.ID), utils.F("player_id", currentPlayerID), utils.F("message", string(payload)))
+		utils.Info("AI 发送消息", utils.F("room_id", r.ID), utils.F("player_id", currentPlayerID), utils.F("message", string(payload)))
 
 		// 向房间的命令通道发送消息，和玩家一样的处理方式
-		room.CmdCh <- domain.Command{
+		r.CmdCh <- domain.Command{
 			Type:     aiMsg["type"].(string),
 			PlayerID: playerId,
 			Payload:  payload,
 			Conn:     conn,
 		}
-
-		utils.Info("AI 发送命令", utils.F("room_id", room.ID), utils.F("player_id", playerId), utils.F("command_type", aiMsg["type"]))
 	}()
 
 	return true

@@ -3,33 +3,19 @@ package game
 import (
 	"encoding/json"
 	"fmt"
-	"go-game/domain/data"
 	"go-game/domain/domain"
+	"go-game/dto"
 	"go-game/entities"
 	"go-game/repository"
 	"go-game/utils"
 	"os"
 	"path"
-	"reflect"
-	"strconv"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/websocket"
-	"github.com/mitchellh/mapstructure"
 )
 
-// 自定义 HookFunc，把字符串转换成 int
-func stringToIntHookFunc() mapstructure.DecodeHookFunc {
-	return func(from reflect.Kind, to reflect.Kind, data interface{}) (interface{}, error) {
-		if from == reflect.String && to == reflect.Int {
-			return strconv.Atoi(data.(string))
-		}
-		return data, nil
-	}
-}
-
-func CalculateTotalValue(playerStocks map[string]int, companyInfoMap map[string]entities.CompanyInfo) int {
+func CalculateTotalValue(playerStocks map[string]int, companyInfoMap map[string]*domain.CompanyState) int {
 	totalValue := 0
 	for company, count := range playerStocks {
 		companyInfo, ok := companyInfoMap[company]
@@ -102,118 +88,33 @@ func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[
 
 // 向该客户端发送同步消息
 func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.PlayerConn, result map[string]int) error {
-	rdb := repository.Rdb
-	ctx := repository.Ctx
-
-	// ------- 构造 Redis Key -------
-	infoKey := fmt.Sprintf("room:%s:player:%s:info", room.ID, pc.PlayerID)
-	tilesKey := fmt.Sprintf("room:%s:player:%s:tiles", room.ID, pc.PlayerID)
-	currentPlayerKey := fmt.Sprintf("room:%s:currentPlayer", room.ID)
-	companyIDsKey := fmt.Sprintf("room:%s:company_ids", room.ID)
-	lastTileKey := fmt.Sprintf("room:%s:last_tile_key_temp", room.ID)
-
-	// ------- 第一次 pipeline：玩家、房间、tile 基础数据 -------
-	pipe := rdb.Pipeline()
-	infoCmd := pipe.HGetAll(ctx, infoKey)
-	tilesCmd := pipe.LRange(ctx, tilesKey, 0, -1)
-	currentPlayerCmd := pipe.Get(ctx, currentPlayerKey)
-	companyIDsCmd := pipe.SMembers(ctx, companyIDsKey)
-	lastTileKeyCmd := pipe.Get(ctx, lastTileKey)
-
-	// 执行 pipeline
-	_, err := pipe.Exec(ctx)
-	if err != nil && err != redis.Nil {
-		return fmt.Errorf("❌ Redis pipeline 执行失败: %w", err)
-	}
-
-	// ------- 提取结果 -------
-	info := infoCmd.Val()
-	tiles := tilesCmd.Val()
-	currentPlayer := currentPlayerCmd.Val()
-	companyIDs := companyIDsCmd.Val()
-	lastTile := lastTileKeyCmd.Val()
-
-	// ------- 第二次 pipeline：批量获取所有公司信息 -------
-	pipe2 := rdb.Pipeline()
-	companyCmds := make(map[string]*redis.StringStringMapCmd)
-
-	for _, companyID := range companyIDs {
-		companyKey := fmt.Sprintf("room:%s:company:%s", room.ID, companyID)
-		companyCmds[companyID] = pipe2.HGetAll(ctx, companyKey)
-	}
-
-	_, err = pipe2.Exec(ctx)
-	if err != nil && err != redis.Nil {
-		return fmt.Errorf("❌ 获取公司信息 pipeline 执行失败: %w", err)
-	}
-
-	companyInfo, err := data.GetCompanyInfo(rdb, room.ID)
-	if err != nil {
-		return fmt.Errorf("❌ 获取公司信息失败: %w", err)
-	}
-
-	roomInfo, err := data.GetRoomInfo(rdb, room.ID)
-	if err != nil {
-		return fmt.Errorf("❌ 获取房间信息失败: %w", err)
-	}
-
-	// ------- 其他 Redis 相关调用 -------
-	tileMap, err := data.GetAllRoomTiles(rdb, room.ID)
-	if err != nil {
-		return fmt.Errorf("❌ 获取房间 tile 信息失败: %w", err)
-	}
-
-	merge_main_company_temp, err := data.GetMergeMainCompany(rdb, ctx, room.ID)
-	if err != nil {
-		return fmt.Errorf("❌ 获取合并主公司信息失败: %w", err)
-	}
-
-	merge_selection_temp, err := data.GetMergingSelection(rdb, ctx, room.ID)
-	if err != nil {
-		return fmt.Errorf("❌ 获取合并选择信息失败: %w", err)
-	}
-
-	mergeSettleData, err := data.GetMergeSettleData(ctx, rdb, room.ID)
-	if err != nil {
-		return fmt.Errorf("❌ 获取合并结算信息失败: %w", err)
-	}
-
-	stocks, err := data.GetPlayerStocks(rdb, ctx, room.ID, pc.PlayerID)
-	if err != nil {
-		return fmt.Errorf("❌ 获取玩家股票信息失败: %w", err)
-	}
-
 	// ------- 组装消息 -------
 	playersInfo := make(map[string]interface{}, 0)
-	for _, pc := range room.Players {
-		playersInfo[pc.PlayerID] = map[string]interface{}{
-			"playerID": pc.PlayerID,
-			"online":   pc.Online,
-			"ai":       pc.AI,
+	for _, p := range room.Connections {
+		playersInfo[p.PlayerID] = map[string]interface{}{
+			"playerID": p.PlayerID,
+			"online":   p.Online,
+			"ai":       p.AI,
 		}
 	}
 
 	msg := map[string]interface{}{
-		"type":     "ROOM_SYNC",
-		"result":   result,
-		"playerId": pc.PlayerID,
-		"playerData": map[string]interface{}{
-			"info":   info,
-			"stocks": stocks,
-			"tiles":  tiles,
-		},
+		"type":       "ROOM_SYNC",
+		"result":     result,
+		"playerId":   pc.PlayerID,
+		"playerData": room.State.Players[pc.PlayerID],
 		"roomData": map[string]interface{}{
-			"companyInfo":   companyInfo,
-			"currentPlayer": currentPlayer,
-			"roomInfo":      roomInfo,
-			"tiles":         tileMap,
+			"companyInfo":   room.State.Companies,
+			"currentPlayer": room.State.CurrentPlayer,
+			"roomInfo":      room.State,
+			"tiles":         room.State.BoardTiles,
 			"players":       playersInfo,
 		},
 		"tempData": map[string]interface{}{
-			"last_tile_key":           lastTile,
-			"merge_main_company_temp": merge_main_company_temp,
-			"merge_selection_temp":    merge_selection_temp,
-			"mergeSettleData":         mergeSettleData,
+			"last_tile_key":           room.State.LastTileKey,
+			"merge_main_company_temp": room.State.MergeMainCompany,
+			"merge_selection_temp":    room.State.MergingSelection,
+			"mergeSettleData":         room.State.MergeSettleData,
 		},
 	}
 
@@ -222,35 +123,33 @@ func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.Pl
 	if err != nil {
 		return fmt.Errorf("❌ 编码 JSON 失败: %w", err)
 	}
-	if pc.PlayerID == currentPlayer {
-		WriteGameLog(room.ID, pc.PlayerID, roomInfo, msg)
-	}
+	// if pc.PlayerID == currentPlayer {
+	// 	WriteGameLog(room.ID, pc.PlayerID, roomInfo, msg)
+	// }
 	return conn.WriteMessage(websocket.TextMessage, data)
 }
 
-func SyncMatchMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.PlayerConn, snapshot *domain.Room) error {
-	playersInfo := make([]map[string]interface{}, 0)
-	for _, p := range room.Players {
-		playersInfo = append(playersInfo, map[string]interface{}{
-			"playerID": p.PlayerID,
-			"online":   p.Online,
-			"ai":       p.AI,
-			"ready":    p.Ready,
-		})
+func SyncMatchMessage(conn domain.WriteOnlyConn, r *domain.Room, pc *domain.PlayerConn) error {
+	playersInfo := make(map[string]dto.RoomPlayer, 0)
+	for _, p := range r.Connections {
+		playersInfo[p.PlayerID] = dto.RoomPlayer{
+			PlayerID: p.PlayerID,
+			Online:   p.Online,
+			AI:       p.AI,
+			Ready:    p.Ready,
+		}
 	}
 
-	msg := struct {
-		Type     string                   `json:"type"`
-		RoomID   string                   `json:"roomID"`
-		PlayerID string                   `json:"playerID"`
-		Room     *domain.Room             `json:"room"`
-		Players  []map[string]interface{} `json:"players"`
-	}{
+	msg := dto.WsMatchSyncData{
 		Type:     "MATCH_SYNC",
-		RoomID:   room.ID,
+		RoomID:   r.ID,
 		PlayerID: pc.PlayerID,
-		Room:     snapshot,
-		Players:  playersInfo,
+		Room: dto.RoomStruct{
+			RoomID:  r.ID,
+			OwnerID: r.State.OwnerID,
+			Status:  r.State.RoomStatus,
+			Players: playersInfo,
+		},
 	}
 
 	// ------- JSON 编码 -------
@@ -269,20 +168,11 @@ func SyncMatchMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.P
 }
 
 // 广播消息给房间内所有连接成功的玩家
-func BroadcastToRoom(room *domain.Room) {
-	companyInfoMap, err := data.GetCompanyInfo(repository.Rdb, room.ID)
-	if err != nil {
-		utils.Error("获取公司信息失败", utils.F("room_id", room.ID), utils.F("error", err))
-		return
-	}
+func BroadcastToRoom(r *domain.Room) {
+	companyInfoMap := r.State.Companies
 
-	tileMap, err := data.GetAllRoomTiles(repository.Rdb, room.ID)
-	if err != nil {
-		utils.Error("获取所有 tile 失败", utils.F("room_id", room.ID), utils.F("error", err))
-		return
-	}
 	allTileMap := make(map[string]int)
-	for _, tile := range tileMap {
+	for _, tile := range r.State.BoardTiles {
 		if tile.Belong != "" && tile.Belong != "Blank" {
 			allTileMap[tile.Belong] = allTileMap[tile.Belong] + 1
 		}
@@ -312,27 +202,18 @@ func BroadcastToRoom(room *domain.Room) {
 	}
 
 	if gameShouldEnd {
-		roomInfo, err := data.GetRoomInfo(repository.Rdb, room.ID)
-		if err != nil {
-			utils.Error("获取房间信息失败", utils.F("room_id", room.ID), utils.F("error", err))
-			return
-		} else if roomInfo.GameStatus != domain.RoomStatusEnd {
-			err = data.SetGameStatus(repository.Rdb, room.ID, domain.RoomStatusEnd)
-			if err != nil {
-				utils.Error("设置房间状态为 end 失败", utils.F("room_id", room.ID), utils.F("error", err))
-			}
+		roomInfo := r.State
+		if roomInfo.RoomStatus != domain.RoomStatusEnd {
+			r.State.RoomStatus = domain.RoomStatusEnd
 		}
 	}
 
 	allStockMap := make(map[string]int)
-	for _, pc := range room.Players {
-		stockMap, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, room.ID, pc.PlayerID)
-		if err != nil {
-			utils.Error("获取玩家股票失败", utils.F("player_id", pc.PlayerID), utils.F("error", err))
-			return
-		}
-		for stockID, stockCount := range stockMap {
-			allStockMap[stockID] += stockCount
+	for _, pc := range r.Connections {
+		if stockMap, ok := r.State.Players[pc.PlayerID]; ok && stockMap != nil {
+			for stockID, stockCount := range stockMap.Stocks {
+				allStockMap[stockID] += stockCount
+			}
 		}
 	}
 
@@ -350,33 +231,23 @@ func BroadcastToRoom(room *domain.Room) {
 		companyInfoMap[companyName] = info
 	}
 
-	err = data.SetCompanyInfo(repository.Rdb, room.ID, companyInfoMap)
-	if err != nil {
-		utils.Error("设置公司信息失败", utils.F("room_id", room.ID), utils.F("error", err))
-		return
-	}
+	r.State.Companies = companyInfoMap
 
 	result := make(map[string]int)
-	for _, pc := range room.Players {
-		playerStocks, err := data.GetPlayerStocks(repository.Rdb, repository.Ctx, room.ID, pc.PlayerID)
-		if err != nil {
-			utils.Error("获取玩家股票失败", utils.F("player_id", pc.PlayerID), utils.F("error", err))
-			continue
+	for _, pc := range r.Connections {
+		if playerInfo, ok := r.State.Players[pc.PlayerID]; ok && playerInfo != nil {
+			playerStocks := playerInfo.Stocks
+			money := playerInfo.Money
+			result[pc.PlayerID] = CalculateTotalValue(playerStocks, companyInfoMap) + money
 		}
-		playerInfo, err := data.GetPlayerInfoField(repository.Rdb, repository.Ctx, room.ID, pc.PlayerID, "money")
-		if err != nil {
-			utils.Error("获取玩家金钱失败", utils.F("player_id", pc.PlayerID), utils.F("error", err))
-			continue
-		}
-		result[pc.PlayerID] = CalculateTotalValue(playerStocks, companyInfoMap) + playerInfo.Money
 	}
 
-	for _, pc := range room.Players {
+	for _, pc := range r.Connections {
 		utils.Info("向玩家 %s 发送同步消息", utils.F("player_id", pc.PlayerID), utils.F("pc.AI", pc.AI))
 
 		if pc.Online {
 			// 尝试发送消息
-			if err := SyncRoomMessage(pc.Conn, room, pc, result); err != nil {
+			if err := SyncRoomMessage(pc.Conn, r, pc, result); err != nil {
 				utils.Error("广播失败，移除连接", utils.F("player_id", pc.PlayerID), utils.F("error", err))
 				pc.Conn.Close()
 			}
@@ -384,33 +255,16 @@ func BroadcastToRoom(room *domain.Room) {
 	}
 }
 
-func SnapshotRoom(r *domain.Room) *domain.Room {
-	copyRoom := *r
-	copyRoom.Players = make(map[string]*domain.PlayerConn)
-
-	for _, p := range r.Players {
-		cp := *p
-		copyRoom.Players[p.PlayerID] = &cp
-	}
-
-	return &copyRoom
-}
-
-func BroadcastToMatch(room *domain.Room) {
-
-	// 生成一次快照，所有人共用
-	snapshot := SnapshotRoom(room)
-
-	for _, pc := range room.Players {
+func BroadcastToMatch(r *domain.Room) {
+	for _, pc := range r.Connections {
 		if !pc.Online {
 			continue
 		}
 
 		if err := SyncMatchMessage(
 			pc.Conn,
-			room,
+			r,
 			pc,
-			snapshot,
 		); err != nil {
 			utils.Error("广播失败，关闭连接", utils.F("player_id", pc.PlayerID), utils.F("error", err))
 			pc.Conn.Close()

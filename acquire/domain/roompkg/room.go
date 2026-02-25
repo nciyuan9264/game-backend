@@ -8,8 +8,6 @@ import (
 	"go-game/domain/data"
 	"go-game/domain/domain"
 	"go-game/domain/game"
-	"go-game/entities"
-	"go-game/repository"
 	"go-game/utils"
 	"sync"
 
@@ -27,7 +25,7 @@ func (r *RoomService) Run() {
 		select {
 		case cmd := <-r.Room.CmdCh:
 			r.handleCommand(cmd)
-			if r.Room.Status == domain.RoomStatusMatch {
+			if r.Room.State.RoomStatus == domain.RoomStatusMatch {
 				game.BroadcastToMatch(r.Room)
 			} else {
 				game.BroadcastToRoom(r.Room)
@@ -81,8 +79,6 @@ func (r *RoomService) handleCommand(cmd domain.Command) {
 		game.HandleBuyStockMessage(r.Room, cmd)
 	case "game_merging_selection":
 		game.HandleMergingSelectionMessage(r.Room, cmd)
-	// case "game_end":
-	// 	game.HandleGameEndMessage(r.Room, cmd)
 	case "game_play_audio":
 		game.HandlePlayAudioMessage(r.Room, cmd)
 	case "game_restart_game":
@@ -99,11 +95,8 @@ func startDelayedDelete(r *domain.Room) {
 	}
 	utils.Info("房间10s后将被删除", utils.F("room_id", r.ID))
 	r.DeleteTimer = time.AfterFunc(10*time.Second, func() {
-		r.RoomLock.Lock()
-		defer r.RoomLock.Unlock()
-
 		// 再次确认：是否仍然没有在线真人
-		for _, p := range r.Players {
+		for _, p := range r.Connections {
 			if !p.AI && p.Online {
 				utils.Info("房间有玩家重连，取消删除", utils.F("room_id", r.ID))
 				r.DeleteTimer = nil
@@ -118,16 +111,16 @@ func startDelayedDelete(r *domain.Room) {
 }
 
 func transferOwnerOrDelete(r *domain.Room) bool {
-	for _, p := range r.Players {
+	for _, p := range r.Connections {
 		if !p.AI && p.Online {
-			r.OwnerID = p.PlayerID
+			r.State.OwnerID = p.PlayerID
 			p.Ready = true
 			utils.Info("房主已变更", utils.F("room_id", r.ID), utils.F("player_id", p.PlayerID))
 			return false
 		}
 	}
 
-	if r.Status == domain.RoomStatusMatch {
+	if r.State.RoomStatus == domain.RoomStatusMatch {
 		// 没有在线真人了
 		startDelayedDelete(r)
 		return true
@@ -136,17 +129,17 @@ func transferOwnerOrDelete(r *domain.Room) bool {
 }
 
 func MarkPlayerOffline(r *domain.Room, playerID string) (roomDeleted bool) {
-	if r.Status == domain.RoomStatusMatch {
+	if r.State.RoomStatus == domain.RoomStatusMatch {
 		for i, pID := range r.PlayerSeq {
 			if pID == playerID {
 				r.PlayerSeq = append(r.PlayerSeq[:i], r.PlayerSeq[i+1:]...)
 				break
 			}
 		}
-		delete(r.Players, playerID)
+		delete(r.Connections, playerID)
 		utils.Info("玩家已从匹配队列中移除", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 	} else {
-		p, ok := r.Players[playerID]
+		p, ok := r.Connections[playerID]
 		if !ok {
 			return
 		}
@@ -167,20 +160,17 @@ func MarkPlayerOffline(r *domain.Room, playerID string) (roomDeleted bool) {
 			}
 
 			p.OfflineTimer = time.AfterFunc(2*time.Minute, func() {
-				r.RoomLock.Lock()
-				defer r.RoomLock.Unlock()
-
 				utils.Info("开始计时", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 
 				// 再次检查玩家状态
-				player, ok := r.Players[playerID]
+				player, ok := r.Connections[playerID]
 				if !ok || player.Online || player.AI {
 					return
 				}
 
 				// 检查房间中是否还有其他在线的真实玩家
 				hasOnlineRealPlayer := false
-				for _, otherPlayer := range r.Players {
+				for _, otherPlayer := range r.Connections {
 					if !otherPlayer.AI && otherPlayer.Online {
 						hasOnlineRealPlayer = true
 						break
@@ -195,7 +185,7 @@ func MarkPlayerOffline(r *domain.Room, playerID string) (roomDeleted bool) {
 		}
 	}
 
-	if playerID == r.OwnerID {
+	if playerID == r.State.OwnerID {
 		return transferOwnerOrDelete(r)
 	}
 
@@ -208,13 +198,10 @@ func handleDisconnectCommand(r *domain.Room, cmd domain.Command) {
 	roomDeleted := MarkPlayerOffline(r, cmd.PlayerID)
 
 	// 2️⃣ 同步 Redis 房间状态（如果房间还在）
-	if !roomDeleted && r.Status != domain.RoomStatusMatch {
-		roomInfo, err := data.GetRoomInfo(repository.Rdb, r.ID)
-		if err != nil {
-			utils.Error("获取房间信息失败", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("error", err))
-		} else if roomInfo.RoomStatus {
-			data.SetRoomStatus(repository.Rdb, r.ID, false)
-		}
+	if !roomDeleted && r.State.RoomStatus != domain.RoomStatusMatch {
+		// roomInfo, err := data.GetRoomInfo(repository.Rdb, r.ID)
+		// data.SetRoomStatus(repository.Rdb, r.ID, false)
+		// r.State.RoomStatus = domain.RoomStatusMatch
 	}
 	utils.Info("玩家已从房间中移除", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID))
 }
@@ -222,7 +209,7 @@ func handleDisconnectCommand(r *domain.Room, cmd domain.Command) {
 // 获取房间中玩家数量
 func getRoomPlayerCount(room *domain.Room) int {
 	onLineCount := 0
-	for _, pc := range room.Players {
+	for _, pc := range room.Connections {
 		if pc.Online {
 			onLineCount++
 		}
@@ -236,7 +223,7 @@ func handleConnectCommand(r *domain.Room, cmd domain.Command) {
 	conn := cmd.Conn
 
 	// 1️⃣ 已存在玩家（重连 or 重复）
-	if p, ok := r.Players[playerID]; ok {
+	if p, ok := r.Connections[playerID]; ok {
 		utils.Info("玩家尝试加入房间（已存在玩家）", utils.F("room_id", r.ID), utils.F("player_id", playerID), utils.F("current_status", p.Online))
 		if !p.Online || p.AI {
 			// 检查是否是真实连接
@@ -272,14 +259,14 @@ func handleConnectCommand(r *domain.Room, cmd domain.Command) {
 		utils.Info("玩家尝试加入房间（新玩家）", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 
 		// 2️⃣ 状态校验
-		if r.Status != domain.RoomStatusMatch {
+		if r.State.RoomStatus != domain.RoomStatusMatch {
 			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"游戏已开始，无法加入"}`))
 			conn.Close()
 			return
 		}
 
 		// 3️⃣ 人数校验
-		if len(r.Players) >= MaxPlayers {
+		if len(r.Connections) >= MaxPlayers {
 			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"房间已满"}`))
 			conn.Close()
 			return
@@ -290,11 +277,11 @@ func handleConnectCommand(r *domain.Room, cmd domain.Command) {
 			realConn.StartHeartbeat()
 		}
 
-		r.Players[playerID] = &domain.PlayerConn{
+		r.Connections[playerID] = &domain.PlayerConn{
 			PlayerID: playerID,
 			Conn:     conn,
 			Online:   true,
-			Ready:    r.OwnerID == playerID,
+			Ready:    r.State.OwnerID == playerID,
 			AI:       false,
 		}
 		r.PlayerSeq = append(r.PlayerSeq, playerID)
@@ -316,7 +303,7 @@ func HandleMatchReady(r *domain.Room, cmd domain.Command) {
 	ready := p.Ready
 
 	// 更新玩家准备状态
-	for _, pc := range r.Players {
+	for _, pc := range r.Connections {
 		if pc.PlayerID == cmd.PlayerID {
 			pc.Ready = ready
 			break
@@ -325,11 +312,9 @@ func HandleMatchReady(r *domain.Room, cmd domain.Command) {
 }
 
 func HandleMatchBegin(r *domain.Room, cmd domain.Command) {
-	ctx := repository.Ctx
-	rdb := repository.Rdb
 	// 检查是否所有玩家都已准备
 	allReady := true
-	for _, pc := range r.Players {
+	for _, pc := range r.Connections {
 		if !pc.Ready {
 			allReady = false
 			break
@@ -341,119 +326,81 @@ func HandleMatchBegin(r *domain.Room, cmd domain.Command) {
 		return
 	}
 
-	// 初始化房间信息
-	err := data.SetRoomInfo(rdb, repository.Ctx, r.ID, entities.RoomInfo{
-		RoomStatus: false,
-		GameStatus: domain.RoomStatusWaiting,
-		MaxPlayers: len(r.Players),
-		OwnerID:    r.OwnerID,
-	})
-	if err != nil {
-		utils.Error("初始化房间信息失败", utils.F("room_id", r.ID), utils.F("error", err))
-		return
-	}
+	r.State.RoomStatus = domain.RoomStatusWaiting
+	r.State.MaxPlayers = len(r.Connections)
 
 	// 初始化公司数据
-	companyData := map[string]map[string]interface{}{
+	r.State.Companies = map[string]*domain.CompanyState{
 		"Sackson": {
-			"name":       "Sackson",
-			"stockTotal": 25,
-			"tiles":      0,   // 初始数量
-			"stockPrice": 200, // 初始参考股价（可调整）
+			Name:       "Sackson",
+			StockTotal: 25,
+			Tiles:      0,   // 初始数量
+			StockPrice: 200, // 初始参考股价（可调整）
 		},
 		"Tower": {
-			"name":       "Tower",
-			"tiles":      0, // 初始数量
-			"stockTotal": 25,
-			"stockPrice": 200,
+			Name:       "Tower",
+			Tiles:      0, // 初始数量
+			StockTotal: 25,
+			StockPrice: 200,
 		},
 		"American": {
-			"name":       "American",
-			"tiles":      0, // 初始数量
-			"stockTotal": 25,
-			"stockPrice": 200,
+			Name:       "American",
+			Tiles:      0, // 初始数量
+			StockTotal: 25,
+			StockPrice: 200,
 		},
 		"Festival": {
-			"name":       "Festival",
-			"tiles":      0, // 初始数量
-			"stockTotal": 25,
-			"stockPrice": 200,
+			Name:       "Festival",
+			Tiles:      0, // 初始数量
+			StockTotal: 25,
+			StockPrice: 200,
 		},
 		"Worldwide": {
-			"name":       "Worldwide",
-			"tiles":      0, // 初始数量
-			"stockTotal": 25,
-			"stockPrice": 200,
+			Name:       "Worldwide",
+			Tiles:      0, // 初始数量
+			StockTotal: 25,
+			StockPrice: 200,
 		},
 		"Continental": {
-			"name":       "Continental",
-			"tiles":      0, // 初始数量
-			"stockTotal": 25,
-			"stockPrice": 200,
+			Name:       "Continental",
+			Tiles:      0, // 初始数量
+			StockTotal: 25,
+			StockPrice: 200,
 		},
 		"Imperial": {
-			"name":       "Imperial",
-			"tiles":      0, // 初始数量
-			"stockTotal": 25,
-			"stockPrice": 200,
+			Name:       "Imperial",
+			Tiles:      0, // 初始数量
+			StockTotal: 25,
+			StockPrice: 200,
 		},
-	}
-	for id, data := range companyData {
-		companyKey := fmt.Sprintf("room:%s:company:%s", r.ID, id)
-		if _, err := rdb.HSet(ctx, companyKey, data).Result(); err != nil {
-			utils.Error("初始化公司失败", utils.F("room_id", r.ID), utils.F("company_id", id), utils.F("error", err))
-			return
-		}
-		rdb.SAdd(ctx, fmt.Sprintf("room:%s:company_ids", r.ID), id)
 	}
 
 	// 初始化游戏棋盘（12x9 个 tile）
-	tileKey := fmt.Sprintf("room:%s:tiles", r.ID)
-	pipe := rdb.Pipeline()
-
 	for col := 1; col <= 12; col++ {
 		for row := 'A'; row <= 'I'; row++ {
 			id := fmt.Sprintf("%d%c", col, row)
-			tile := domain.Tile{
+			tile := &domain.Tile{
 				ID:     id,
 				Belong: "",
 			}
-			tileJSON, err := json.Marshal(tile)
-			if err != nil {
-				utils.Error("tile 序列化失败", utils.F("room_id", r.ID), utils.F("tile_id", id), utils.F("error", err))
-				return
-			}
-			pipe.HSet(ctx, tileKey, id, tileJSON)
+			r.State.BoardTiles[id] = tile
 		}
 	}
 
-	_, err = pipe.Exec(ctx)
-	if err != nil {
-		utils.Error("tile 初始化 Redis 写入失败", utils.F("room_id", r.ID), utils.F("error", err))
-		return
-	}
-
-	for playerID, player := range r.Players {
-		if player.AI {
-			data.InitPlayerData(r, playerID)
-			utils.Info("AI 玩家加入房间", utils.F("room_id", r.ID), utils.F("player_id", playerID))
-		}
+	for playerID := range r.Connections {
+		data.InitPlayerData(r, playerID)
+		utils.Info("玩家加入房间", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 	}
 
 	// 更新房间状态为匹配中
-	r.Status = domain.RoomStatusWaiting
-	err = data.SetGameStatus(rdb, r.ID, domain.RoomStatusWaiting)
-	if err != nil {
-		utils.Error("redis设置游戏状态失败", utils.F("room_id", r.ID), utils.F("error", err))
-		return
-	}
+	r.State.RoomStatus = domain.RoomStatusWaiting
 
 	// 开始游戏
 	utils.Info("所有玩家都已准备，开始游戏", utils.F("room_id", r.ID))
 }
 
 func JoinMatchAsAI(r *domain.Room, playerID string) bool {
-	r.Players[playerID] = &domain.PlayerConn{
+	r.Connections[playerID] = &domain.PlayerConn{
 		PlayerID: playerID,
 		Conn:     &VirtualConn{Room: r},
 		Online:   true,
@@ -468,14 +415,14 @@ func JoinMatchAsAI(r *domain.Room, playerID string) bool {
 
 func HandleAddAI(r *domain.Room, cmd domain.Command) {
 	// 检查房间是否已满
-	if len(r.Players) >= MaxPlayers {
+	if len(r.Connections) >= MaxPlayers {
 		utils.Error("房间已满，无法添加 AI", utils.F("room_id", r.ID))
 		return
 	}
 
 	// 检查房间状态是否为等待加入
-	if r.Status != domain.RoomStatusMatch {
-		utils.Error("房间状态不是等待加入，无法添加 AI", utils.F("room_id", r.ID), utils.F("current_status", r.Status))
+	if r.State.RoomStatus != domain.RoomStatusMatch {
+		utils.Error("房间状态不是等待加入，无法添加 AI", utils.F("room_id", r.ID), utils.F("current_status", r.State.RoomStatus))
 		return
 	}
 
@@ -488,12 +435,12 @@ type RemovePlayerPayload struct {
 }
 
 func RemovePlayer(r *domain.Room, playerID string) bool {
-	if _, ok := r.Players[playerID]; !ok {
+	if _, ok := r.Connections[playerID]; !ok {
 		utils.Error("房间中不存在玩家", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 		return false
 	}
 
-	delete(r.Players, playerID)
+	delete(r.Connections, playerID)
 	for i, pid := range r.PlayerSeq {
 		if pid == playerID {
 			r.PlayerSeq = append(r.PlayerSeq[:i], r.PlayerSeq[i+1:]...)
@@ -506,7 +453,7 @@ func RemovePlayer(r *domain.Room, playerID string) bool {
 
 // ReplacePlayerWithAI 将离线玩家替换为AI玩家
 func ReplacePlayerWithAI(r *domain.Room, playerID string) {
-	player, ok := r.Players[playerID]
+	player, ok := r.Connections[playerID]
 	if !ok {
 		utils.Error("房间中不存在玩家", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 		return
@@ -522,11 +469,6 @@ func ReplacePlayerWithAI(r *domain.Room, playerID string) {
 	player.AI = true
 	player.Online = true // AI玩家始终在线
 	player.Conn = &VirtualConn{Room: r}
-	err := data.SetRoomStatus(repository.Rdb, r.ID, true)
-	if err != nil {
-		utils.Error("设置房间状态失败", utils.F("room_id", r.ID), utils.F("error", err))
-		return
-	}
 	game.BroadcastToRoom(r)
 	utils.Info("玩家替换为AI", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 	utils.Info("Redis中玩家状态已更新为AI", utils.F("room_id", r.ID), utils.F("player_id", playerID))
@@ -541,13 +483,13 @@ func HandleRemovePlayer(r *domain.Room, cmd domain.Command) {
 	removePlayerID := p.PlayerID
 
 	// 检查房间状态是否为等待加入
-	if r.Status != domain.RoomStatusMatch {
-		utils.Error("房间状态不是等待加入，无法移除玩家", utils.F("room_id", r.ID), utils.F("current_status", r.Status))
+	if r.State.RoomStatus != domain.RoomStatusMatch {
+		utils.Error("房间状态不是等待加入，无法移除玩家", utils.F("room_id", r.ID), utils.F("current_status", r.State.RoomStatus))
 		return
 	}
 
 	// 检查玩家是否存在
-	if removePlayerConn, ok := r.Players[removePlayerID]; ok {
+	if removePlayerConn, ok := r.Connections[removePlayerID]; ok {
 		// 给被移除的玩家发送错误消息
 		msg := struct {
 			Type    string `json:"type"`
@@ -569,40 +511,22 @@ func HandleRemovePlayer(r *domain.Room, cmd domain.Command) {
 }
 
 func HandleReadyMessage(r *domain.Room, cmd domain.Command) {
-	roomInfo, err := data.GetRoomInfo(repository.Rdb, r.ID)
-	if err != nil {
-		utils.Error("无法获取房间信息", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("error", err))
-		return
-	}
-	maxPlayers := roomInfo.MaxPlayers
-	data.InitPlayerData(r, cmd.PlayerID)
+	maxPlayers := r.State.MaxPlayers
 	// 获取房间当前人数
 	playerCount := getRoomPlayerCount(r)
 	utils.Info("玩家加入", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("current_count", playerCount), utils.F("max_players", maxPlayers))
 
 	if playerCount == maxPlayers {
-		err := data.SetRoomStatus(repository.Rdb, r.ID, true)
-		if err != nil {
-			utils.Error("设置房间状态失败", utils.F("room_id", r.ID), utils.F("error", err))
-			return
-		}
+		r.State.GameStartTime = time.Now()
 
-		startKey := fmt.Sprintf("room:%s:game_start_time", r.ID)
-		repository.Rdb.Set(repository.Ctx, startKey, time.Now().Format("20060102_150405"), 0)
-
-		playerID, err := data.GetCurrentPlayer(repository.Rdb, repository.Ctx, r.ID)
-		if err != nil {
-			utils.Error("获取当前玩家失败", utils.F("room_id", r.ID), utils.F("error", err))
-			return
-		}
-		if playerID == "" {
-			if len(r.Players) == 0 {
+		if r.State.CurrentPlayer == "" {
+			if len(r.Connections) == 0 {
 				utils.Error("房间中没有玩家，无法设置当前玩家", utils.F("room_id", r.ID))
 				return
 			}
 
-			playerIDs := make([]string, 0, len(r.Players))
-			for pid, pc := range r.Players {
+			playerIDs := make([]string, 0, len(r.Connections))
+			for pid, pc := range r.Connections {
 				if pc != nil {
 					playerIDs = append(playerIDs, pid)
 				}
@@ -613,20 +537,11 @@ func HandleReadyMessage(r *domain.Room, cmd domain.Command) {
 			}
 			sort.Strings(playerIDs)
 			firstPlayerID := playerIDs[0]
-			err = data.SetCurrentPlayer(repository.Rdb, repository.Ctx, r.ID, firstPlayerID)
-			if err != nil {
-				utils.Error("设置当前玩家失败", utils.F("room_id", r.ID), utils.F("error", err))
-				return
-			}
+			r.State.CurrentPlayer = firstPlayerID
 		}
 		// 更新房间状态为匹配中
-		if roomInfo.GameStatus == domain.RoomStatusWaiting {
-			r.Status = domain.RoomStatusSetTile
-			err = data.SetGameStatus(repository.Rdb, r.ID, domain.RoomStatusSetTile)
-			if err != nil {
-				utils.Error("redis设置游戏状态失败", utils.F("room_id", r.ID), utils.F("error", err))
-				return
-			}
+		if r.State.RoomStatus == domain.RoomStatusWaiting {
+			r.State.RoomStatus = domain.RoomStatusSetTile
 		}
 	}
 }

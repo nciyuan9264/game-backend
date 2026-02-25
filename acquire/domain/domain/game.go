@@ -63,15 +63,6 @@ func NewRealConn(conn *websocket.Conn) *RealConn {
 	}
 }
 
-type Tile struct {
-	ID     string `json:"id"`     // "1A"
-	Belong string `json:"belong"` // 公司名
-}
-
-type PlayerInfo struct {
-	Money int `json:"money"`
-}
-
 type RoomStatus string
 
 // 玩家连接对象结构体

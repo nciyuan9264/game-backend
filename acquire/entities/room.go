@@ -9,11 +9,6 @@ type CompanyInfo struct {
 	Tiles      int    `json:"tiles"`
 }
 
-type MergingSelection struct {
-	MainCompany  []string `json:"mainCompany"`
-	OtherCompany []string `json:"otherCompany"`
-}
-
 type RoomInfo struct {
 	RoomStatus bool              `json:"roomStatus"`
 	GameStatus domain.RoomStatus `json:"gameStatus"`

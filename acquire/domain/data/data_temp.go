@@ -1,128 +1,118 @@
 package data
 
-import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"go-game/domain/domain"
-	"go-game/entities"
+// func SetMergeSettleData(ctx context.Context, rdb *redis.Client, roomID string, data map[string]domain.SettleData) error {
+// 	jsonData, err := json.Marshal(data)
+// 	if err != nil {
+// 		return fmt.Errorf("序列化 SettleData map 失败: %w", err)
+// 	}
 
-	"github.com/go-redis/redis/v8"
-)
+// 	key := fmt.Sprintf("room:%s:merge_settle_temp", roomID)
+// 	if err := rdb.Set(ctx, key, jsonData, 0).Err(); err != nil {
+// 		return fmt.Errorf("写入 Redis 失败: %w", err)
+// 	}
+// 	return nil
+// }
 
-func SetMergeSettleData(ctx context.Context, rdb *redis.Client, roomID string, data map[string]domain.SettleData) error {
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return fmt.Errorf("序列化 SettleData map 失败: %w", err)
-	}
+// func GetMergeSettleData(ctx context.Context, rdb *redis.Client, roomID string) (map[string]domain.SettleData, error) {
+// 	key := fmt.Sprintf("room:%s:merge_settle_temp", roomID)
 
-	key := fmt.Sprintf("room:%s:merge_settle_temp", roomID)
-	if err := rdb.Set(ctx, key, jsonData, 0).Err(); err != nil {
-		return fmt.Errorf("写入 Redis 失败: %w", err)
-	}
-	return nil
-}
+// 	result, err := rdb.Get(ctx, key).Result()
+// 	if err != nil {
+// 		if err == redis.Nil {
+// 			return map[string]domain.SettleData{}, nil
+// 		}
+// 		return nil, fmt.Errorf("从 Redis 获取数据失败: %w", err)
+// 	}
 
-func GetMergeSettleData(ctx context.Context, rdb *redis.Client, roomID string) (map[string]domain.SettleData, error) {
-	key := fmt.Sprintf("room:%s:merge_settle_temp", roomID)
+// 	var data map[string]domain.SettleData
+// 	if err := json.Unmarshal([]byte(result), &data); err != nil {
+// 		return nil, fmt.Errorf("反序列化 SettleData map 失败: %w", err)
+// 	}
 
-	result, err := rdb.Get(ctx, key).Result()
-	if err != nil {
-		if err == redis.Nil {
-			return map[string]domain.SettleData{}, nil
-		}
-		return nil, fmt.Errorf("从 Redis 获取数据失败: %w", err)
-	}
+// 	return data, nil
+// }
 
-	var data map[string]domain.SettleData
-	if err := json.Unmarshal([]byte(result), &data); err != nil {
-		return nil, fmt.Errorf("反序列化 SettleData map 失败: %w", err)
-	}
+// func SetMergingSelection(rdb *redis.Client, ctx context.Context, roomID string, company domain.MergingSelection) error {
+// 	key := fmt.Sprintf("room:%s:merge_selection_temp", roomID)
 
-	return data, nil
-}
+// 	// 将结构体序列化为 JSON
+// 	companyJson, err := json.Marshal(company)
+// 	if err != nil {
+// 		return fmt.Errorf("序列化合并选择失败: %w", err)
+// 	}
 
-func SetMergingSelection(rdb *redis.Client, ctx context.Context, roomID string, company entities.MergingSelection) error {
-	key := fmt.Sprintf("room:%s:merge_selection_temp", roomID)
+// 	// 存储到 Redis
+// 	if err := rdb.Set(ctx, key, companyJson, 0).Err(); err != nil {
+// 		return fmt.Errorf("设置合并选择失败: %w", err)
+// 	}
 
-	// 将结构体序列化为 JSON
-	companyJson, err := json.Marshal(company)
-	if err != nil {
-		return fmt.Errorf("序列化合并选择失败: %w", err)
-	}
+// 	return nil
+// }
 
-	// 存储到 Redis
-	if err := rdb.Set(ctx, key, companyJson, 0).Err(); err != nil {
-		return fmt.Errorf("设置合并选择失败: %w", err)
-	}
+// // GetMergeOtherCompanies 从Redis获取合并的其他公司列表
+// func GetMergingSelection(rdb *redis.Client, ctx context.Context, roomID string) (domain.MergingSelection, error) {
+// 	key := fmt.Sprintf("room:%s:merge_selection_temp", roomID)
 
-	return nil
-}
+// 	var selection domain.MergingSelection
 
-// GetMergeOtherCompanies 从Redis获取合并的其他公司列表
-func GetMergingSelection(rdb *redis.Client, ctx context.Context, roomID string) (entities.MergingSelection, error) {
-	key := fmt.Sprintf("room:%s:merge_selection_temp", roomID)
+// 	// 从 Redis 中获取 JSON 数据
+// 	data, err := rdb.Get(ctx, key).Result()
+// 	if err != nil {
+// 		if err == redis.Nil {
+// 			return domain.MergingSelection{}, nil
+// 		}
+// 		return selection, fmt.Errorf("❌ 获取合并选择失败: %w", err)
+// 	}
 
-	var selection entities.MergingSelection
+// 	// 反序列化 JSON 到结构体
+// 	if err := json.Unmarshal([]byte(data), &selection); err != nil {
+// 		return selection, fmt.Errorf("❌ 解析合并选择 JSON 失败: %w", err)
+// 	}
 
-	// 从 Redis 中获取 JSON 数据
-	data, err := rdb.Get(ctx, key).Result()
-	if err != nil {
-		if err == redis.Nil {
-			return entities.MergingSelection{}, nil
-		}
-		return selection, fmt.Errorf("❌ 获取合并选择失败: %w", err)
-	}
+// 	return selection, nil
+// }
 
-	// 反序列化 JSON 到结构体
-	if err := json.Unmarshal([]byte(data), &selection); err != nil {
-		return selection, fmt.Errorf("❌ 解析合并选择 JSON 失败: %w", err)
-	}
+// // SetLastTileKey 保存刚才放置的tile
+// func SetLastTileKey(rdb *redis.Client, ctx context.Context, roomID, playerID, tileKey string) error {
+// 	createTileKey := fmt.Sprintf("room:%s:last_tile_key_temp", roomID)
+// 	if err := rdb.Set(ctx, createTileKey, tileKey, 0).Err(); err != nil {
+// 		return fmt.Errorf("保存触发创建公司tile编号失败: %w", err)
+// 	}
+// 	return nil
+// }
 
-	return selection, nil
-}
+// // GetLastTileKey 获取刚才放置的tile
+// func GetLastTileKey(rdb *redis.Client, ctx context.Context, roomID string) (string, error) {
+// 	createTileKey := fmt.Sprintf("room:%s:last_tile_key_temp", roomID)
+// 	tileKey, err := rdb.Get(ctx, createTileKey).Result()
+// 	if err != nil {
+// 		return "", fmt.Errorf("获取触发创建公司tile编号失败: %w", err)
+// 	}
+// 	return tileKey, nil
+// }
 
-// SetLastTileKey 保存刚才放置的tile
-func SetLastTileKey(rdb *redis.Client, ctx context.Context, roomID, playerID, tileKey string) error {
-	createTileKey := fmt.Sprintf("room:%s:last_tile_key_temp", roomID)
-	if err := rdb.Set(ctx, createTileKey, tileKey, 0).Err(); err != nil {
-		return fmt.Errorf("保存触发创建公司tile编号失败: %w", err)
-	}
-	return nil
-}
+// // SetMergeMainCompany 设置合并的主公司名称
+// func SetMergeMainCompany(rdb *redis.Client, ctx context.Context, roomID string, company string) error {
+// 	mainCompanyNameKey := fmt.Sprintf("room:%s:merge_main_company_temp", roomID)
+// 	if err := rdb.Set(ctx, mainCompanyNameKey, company, 0).Err(); err != nil {
+// 		return fmt.Errorf("设置合并主公司失败: %w", err)
+// 	}
+// 	return nil
+// }
 
-// GetLastTileKey 获取刚才放置的tile
-func GetLastTileKey(rdb *redis.Client, ctx context.Context, roomID string) (string, error) {
-	createTileKey := fmt.Sprintf("room:%s:last_tile_key_temp", roomID)
-	tileKey, err := rdb.Get(ctx, createTileKey).Result()
-	if err != nil {
-		return "", fmt.Errorf("获取触发创建公司tile编号失败: %w", err)
-	}
-	return tileKey, nil
-}
+// // GetMergeMainCompany 从Redis获取合并的主公司名称
+// func GetMergeMainCompany(rdb *redis.Client, ctx context.Context, roomID string) (string, error) {
+// 	mainCompanyKey := fmt.Sprintf("room:%s:merge_main_company_temp", roomID)
 
-// SetMergeMainCompany 设置合并的主公司名称
-func SetMergeMainCompany(rdb *redis.Client, ctx context.Context, roomID string, company string) error {
-	mainCompanyNameKey := fmt.Sprintf("room:%s:merge_main_company_temp", roomID)
-	if err := rdb.Set(ctx, mainCompanyNameKey, company, 0).Err(); err != nil {
-		return fmt.Errorf("设置合并主公司失败: %w", err)
-	}
-	return nil
-}
+// 	// 从Redis获取主公司名称
+// 	company, err := rdb.Get(ctx, mainCompanyKey).Result()
+// 	if err != nil {
+// 		if err == redis.Nil {
+// 			// 键不存在时返回空字符串
+// 			return "", nil
+// 		}
+// 		return "", fmt.Errorf("获取主公司名称失败: %w", err)
+// 	}
 
-// GetMergeMainCompany 从Redis获取合并的主公司名称
-func GetMergeMainCompany(rdb *redis.Client, ctx context.Context, roomID string) (string, error) {
-	mainCompanyKey := fmt.Sprintf("room:%s:merge_main_company_temp", roomID)
-
-	// 从Redis获取主公司名称
-	company, err := rdb.Get(ctx, mainCompanyKey).Result()
-	if err != nil {
-		if err == redis.Nil {
-			// 键不存在时返回空字符串
-			return "", nil
-		}
-		return "", fmt.Errorf("获取主公司名称失败: %w", err)
-	}
-
-	return company, nil
-}
+// 	return company, nil
+// }

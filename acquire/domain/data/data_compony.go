@@ -1,83 +1,73 @@
 package data
 
-import (
-	"fmt"
-	"go-game/entities"
-	"go-game/repository"
-	"go-game/utils"
-	"strconv"
+// func GetCompanyIDs(roomID string) ([]string, error) {
+// 	ctx := repository.Ctx
+// 	rdb := repository.Rdb
 
-	"github.com/go-redis/redis/v8"
-)
+// 	key := fmt.Sprintf("room:%s:company_ids", roomID)
+// 	ids, err := rdb.SMembers(ctx, key).Result()
+// 	if err != nil {
+// 		return nil, fmt.Errorf("获取公司ID失败: %w", err)
+// 	}
+// 	return ids, nil
+// }
 
-func GetCompanyIDs(roomID string) ([]string, error) {
-	ctx := repository.Ctx
-	rdb := repository.Rdb
+// // SetCompanyInfo 批量设置公司信息(companyInfo仅在每次广播时同步即可，日常无需修改)
+// func SetCompanyInfo(rdb *redis.Client, roomID string, companyInfoMap map[string]entities.CompanyInfo) error {
+// 	for companyID, info := range companyInfoMap {
+// 		companyKey := fmt.Sprintf("room:%s:company:%s", roomID, companyID)
 
-	key := fmt.Sprintf("room:%s:company_ids", roomID)
-	ids, err := rdb.SMembers(ctx, key).Result()
-	if err != nil {
-		return nil, fmt.Errorf("获取公司ID失败: %w", err)
-	}
-	return ids, nil
-}
+// 		// 使用 HSet 设置哈希字段
+// 		err := rdb.HSet(repository.Ctx, companyKey, map[string]interface{}{
+// 			"name":       info.Name,
+// 			"stockPrice": info.StockPrice,
+// 			"stockTotal": info.StockTotal,
+// 			"tiles":      info.Tiles,
+// 		}).Err()
+// 		if err != nil {
+// 			utils.Error("写入公司信息失败", utils.F("company_id", companyID), utils.F("error", err))
+// 			return fmt.Errorf("写入公司[%s]信息失败: %w", companyID, err)
+// 		}
 
-// SetCompanyInfo 批量设置公司信息(companyInfo仅在每次广播时同步即可，日常无需修改)
-func SetCompanyInfo(rdb *redis.Client, roomID string, companyInfoMap map[string]entities.CompanyInfo) error {
-	for companyID, info := range companyInfoMap {
-		companyKey := fmt.Sprintf("room:%s:company:%s", roomID, companyID)
+// 		// 添加 companyID 到 room 的公司集合中，确保可以被 Get 时遍历到
+// 		err = rdb.SAdd(repository.Ctx, fmt.Sprintf("room:%s:company_ids", roomID), companyID).Err()
+// 		if err != nil {
+// 			utils.Error("添加公司到集合失败", utils.F("company_id", companyID), utils.F("error", err))
+// 			// 非致命，可以继续
+// 		}
+// 	}
 
-		// 使用 HSet 设置哈希字段
-		err := rdb.HSet(repository.Ctx, companyKey, map[string]interface{}{
-			"name":       info.Name,
-			"stockPrice": info.StockPrice,
-			"stockTotal": info.StockTotal,
-			"tiles":      info.Tiles,
-		}).Err()
-		if err != nil {
-			utils.Error("写入公司信息失败", utils.F("company_id", companyID), utils.F("error", err))
-			return fmt.Errorf("写入公司[%s]信息失败: %w", companyID, err)
-		}
+// 	return nil
+// }
 
-		// 添加 companyID 到 room 的公司集合中，确保可以被 Get 时遍历到
-		err = rdb.SAdd(repository.Ctx, fmt.Sprintf("room:%s:company_ids", roomID), companyID).Err()
-		if err != nil {
-			utils.Error("添加公司到集合失败", utils.F("company_id", companyID), utils.F("error", err))
-			// 非致命，可以继续
-		}
-	}
+// // GetCompanyInfo 返回所有公司信息
+// func GetCompanyInfo(rdb *redis.Client, roomID string) (map[string]entities.CompanyInfo, error) {
+// 	companyIDs, err := rdb.SMembers(repository.Ctx, fmt.Sprintf("room:%s:company_ids", roomID)).Result()
+// 	if err != nil {
+// 		return nil, fmt.Errorf("获取公司ID失败: %w", err)
+// 	}
 
-	return nil
-}
+// 	companyInfo := make(map[string]entities.CompanyInfo)
+// 	for _, companyID := range companyIDs {
+// 		companyKey := fmt.Sprintf("room:%s:company:%s", roomID, companyID)
+// 		data, err := rdb.HGetAll(repository.Ctx, companyKey).Result()
+// 		if err != nil {
+// 			utils.Error("获取公司信息失败", utils.F("company_id", companyID), utils.F("error", err))
+// 			continue
+// 		}
 
-// GetCompanyInfo 返回所有公司信息
-func GetCompanyInfo(rdb *redis.Client, roomID string) (map[string]entities.CompanyInfo, error) {
-	companyIDs, err := rdb.SMembers(repository.Ctx, fmt.Sprintf("room:%s:company_ids", roomID)).Result()
-	if err != nil {
-		return nil, fmt.Errorf("获取公司ID失败: %w", err)
-	}
+// 		// 转换字段
+// 		stockPrice, _ := strconv.Atoi(data["stockPrice"])
+// 		stockTotal, _ := strconv.Atoi(data["stockTotal"])
+// 		tiles, _ := strconv.Atoi(data["tiles"])
 
-	companyInfo := make(map[string]entities.CompanyInfo)
-	for _, companyID := range companyIDs {
-		companyKey := fmt.Sprintf("room:%s:company:%s", roomID, companyID)
-		data, err := rdb.HGetAll(repository.Ctx, companyKey).Result()
-		if err != nil {
-			utils.Error("获取公司信息失败", utils.F("company_id", companyID), utils.F("error", err))
-			continue
-		}
+// 		companyInfo[companyID] = entities.CompanyInfo{
+// 			Name:       data["name"],
+// 			StockPrice: stockPrice,
+// 			StockTotal: stockTotal,
+// 			Tiles:      tiles,
+// 		}
+// 	}
 
-		// 转换字段
-		stockPrice, _ := strconv.Atoi(data["stockPrice"])
-		stockTotal, _ := strconv.Atoi(data["stockTotal"])
-		tiles, _ := strconv.Atoi(data["tiles"])
-
-		companyInfo[companyID] = entities.CompanyInfo{
-			Name:       data["name"],
-			StockPrice: stockPrice,
-			StockTotal: stockTotal,
-			Tiles:      tiles,
-		}
-	}
-
-	return companyInfo, nil
-}
+// 	return companyInfo, nil
+// }

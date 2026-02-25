@@ -11,8 +11,8 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-func GiveRandomTileToPlayer(rdb *redis.Client, ctx context.Context, room *domain.Room, playerID string) error {
-	allTiles, err := data.GenerateAvailableTiles(room)
+func GiveRandomTileToPlayer(rdb *redis.Client, ctx context.Context, r *domain.Room, playerID string) error {
+	allTiles, err := data.GenerateAvailableTiles(r)
 	if err != nil {
 		return fmt.Errorf("生成可用 tiles 失败: %w", err)
 	}
@@ -33,9 +33,7 @@ func GiveRandomTileToPlayer(rdb *redis.Client, ctx context.Context, room *domain
 	}
 
 	// 添加到玩家 tiles 中
-	if err := data.AddPlayerTile(rdb, ctx, room.ID, playerID, selected[0]); err != nil {
-		return fmt.Errorf("添加 tile 失败: %w", err)
-	}
+	r.State.Players[playerID].Tiles = append(r.State.Players[playerID].Tiles, selected[0])
 
 	utils.Info("玩家获得 tile", utils.F("player_id", playerID), utils.F("tile", selected[0]))
 	return nil
