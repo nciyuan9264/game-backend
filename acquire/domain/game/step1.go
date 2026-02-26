@@ -339,13 +339,13 @@ func HandlePlaceTileMessage(r *domain.Room, cmd domain.Command) {
 	// Step1: 放置棋子
 	err := placeTile(r, cmd.PlayerID, tileKey)
 	if err != nil {
-		utils.Error("放置棋子失败", utils.F("tile_key", tileKey), utils.F("error", err))
+		utils.Error("放置棋子失败", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("tile_key", tileKey), utils.F("error", err))
 		return
 	}
 	// Step2: 检查 创建公司/并购公司
 	err = checkTileTriggerRules(repository.Rdb, r, cmd.PlayerID, tileKey)
 	if err != nil {
-		utils.Error("检查棋子规则失败", utils.F("error", err))
+		utils.Error("检查棋子规则失败", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("error", err))
 		return
 	}
 }
@@ -399,7 +399,7 @@ func HandleMergingSelectionMessage(r *domain.Room, cmd domain.Command) {
 
 	err := handleMergeProcess(r, maincompany, mergeSelectionTemp.OtherCompany, hotelTileCount)
 	if err != nil {
-		utils.Error("处理合并过程失败", utils.F("error", err))
+		utils.Error("处理合并过程失败", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("error", err))
 		return
 	}
 }
@@ -411,13 +411,13 @@ type MergingSettlePayload struct {
 func HandleMergingSettleMessage(r *domain.Room, cmd domain.Command) {
 	var p MergingSettlePayload
 	if err := json.Unmarshal(cmd.Payload, &p); err != nil {
-		utils.Error("无效的 payload", utils.F("error", err))
+		utils.Error("无效的 payload", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("error", err))
 		return
 	}
 
 	settleActions := p.Actions
 	if r.State.RoomStatus != domain.RoomStatusMergingSettle {
-		utils.Error("不是合并的状态")
+		utils.Error("不是合并的状态", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID))
 		return
 	}
 

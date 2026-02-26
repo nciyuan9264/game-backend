@@ -108,7 +108,7 @@ func HandleBuyStockMessage(r *domain.Room, cmd domain.Command) {
 		count := countVal
 		for i := 0; i < count; i++ {
 			if err := UpdateCompanyStockAndTiles(repository.Rdb, r, company); err != nil {
-				utils.Error("更新公司失败", utils.F("company", company), utils.F("error", err))
+				utils.Error("更新公司失败", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("company", company), utils.F("error", err))
 				return
 			}
 		}
@@ -118,14 +118,14 @@ func HandleBuyStockMessage(r *domain.Room, cmd domain.Command) {
 	for company, countVal := range stocks {
 		count := countVal
 		if err := UpdatePlayerStockAndMoney(repository.Rdb, repository.Ctx, r, cmd.PlayerID, company, count, priceMap[company]*count); err != nil {
-			utils.Error("更新玩家失败", utils.F("player_id", cmd.PlayerID), utils.F("company", company), utils.F("error", err))
+			utils.Error("更新玩家失败", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("company", company), utils.F("error", err))
 			return
 		}
 	}
 
 	err := GiveRandomTileToPlayer(repository.Rdb, repository.Ctx, r, cmd.PlayerID)
 	if err != nil {
-		utils.Warn("发牌失败", utils.F("player_id", cmd.PlayerID), utils.F("error", err))
+		utils.Warn("发牌失败", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("error", err))
 	}
 	// 切换玩家
 	if err := SwitchToNextPlayer(r, cmd.PlayerID); err != nil {

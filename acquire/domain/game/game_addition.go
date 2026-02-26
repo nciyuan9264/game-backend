@@ -81,7 +81,7 @@ func HandlePlayAudioMessage(r *domain.Room, cmd domain.Command) {
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {
-		utils.Error("编码 JSON 失败", utils.F("error", err))
+		utils.Error("编码 JSON 失败", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("error", err))
 		return
 	}
 
@@ -89,7 +89,7 @@ func HandlePlayAudioMessage(r *domain.Room, cmd domain.Command) {
 		if pc.Online && pc.Conn != nil {
 			err := pc.Conn.WriteMessage(websocket.TextMessage, data)
 			if err != nil {
-				utils.Error("向玩家 %s 发送音频消息失败", utils.F("player_id", pc.PlayerID), utils.F("error", err))
+				utils.Error("向玩家 %s 发送音频消息失败", utils.F("room_id", r.ID), utils.F("player_id", pc.PlayerID), utils.F("error", err))
 			}
 		}
 	}
@@ -110,7 +110,7 @@ func HandleRestartGameMessage(r *domain.Room, cmd domain.Command) {
 		// 2. 设置初始资金
 		playerTiles, err := data.GenerateAvailableTiles(r, 5)
 		if err != nil {
-			utils.Error("生成可用 tile 失败", utils.F("error", err))
+			utils.Error("生成可用 tile 失败", utils.F("room_id", r.ID), utils.F("player_id", playerID), utils.F("error", err))
 			return
 		}
 

@@ -47,7 +47,7 @@ func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[
 
 		// 确保目录存在
 		if err := os.MkdirAll(path.Dir(logPath), 0755); err != nil {
-			utils.Error("创建日志目录失败", utils.F("log_path", logPath), utils.F("error", err))
+			utils.Error("创建日志目录失败", utils.F("room_id", roomID), utils.F("log_path", logPath), utils.F("error", err))
 			return
 		}
 
@@ -69,7 +69,7 @@ func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[
 
 		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
-			utils.Error("打开游戏日志文件失败", utils.F("log_path", logPath), utils.F("error", err))
+			utils.Error("打开游戏日志文件失败", utils.F("room_id", roomID), utils.F("log_path", logPath), utils.F("error", err))
 			return
 		}
 		defer f.Close()
@@ -77,11 +77,11 @@ func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[
 		jsonEntry = append(jsonEntry, ',')
 
 		if _, err := f.Write(jsonEntry); err != nil {
-			utils.Error("写入日志失败", utils.F("log_path", logPath), utils.F("error", err))
+			utils.Error("写入日志失败", utils.F("room_id", roomID), utils.F("log_path", logPath), utils.F("error", err))
 			return
 		}
 		if _, err := f.Write([]byte("\n")); err != nil {
-			utils.Error("写入换行失败", utils.F("log_path", logPath), utils.F("error", err))
+			utils.Error("写入换行失败", utils.F("room_id", roomID), utils.F("log_path", logPath), utils.F("error", err))
 		}
 	}()
 }
@@ -187,7 +187,7 @@ func BroadcastToRoom(r *domain.Room) {
 
 		if tileCount >= 41 {
 			gameShouldEnd = true
-			utils.Info("游戏结束：公司[%s]的 tile 数量[%d] >= 41", utils.F("room_id", r.ID), utils.F("company", company), utils.F("tile_count", tileCount))
+			utils.Info("游戏结束：公司的 tile 数量 >= 41", utils.F("room_id", r.ID), utils.F("company", company), utils.F("tile_count", tileCount))
 			break
 		}
 
@@ -198,7 +198,7 @@ func BroadcastToRoom(r *domain.Room) {
 
 	if !gameShouldEnd && allCompaniesAbove11 && totalTiles > 90 {
 		gameShouldEnd = true
-		utils.Info("游戏结束：每个公司 tile 都 > 11 且 tile 被公司占用总数[%d] > 90", utils.F("room_id", r.ID), utils.F("total_tiles", totalTiles))
+		utils.Info("游戏结束：每个公司 tile 都 > 11 且 tile 被公司占用总数 > 90", utils.F("room_id", r.ID), utils.F("total_tiles", totalTiles))
 	}
 
 	if gameShouldEnd {
@@ -246,7 +246,7 @@ func BroadcastToRoom(r *domain.Room) {
 		if pc.Online {
 			// 尝试发送消息
 			if err := SyncRoomMessage(pc.Conn, r, pc, result); err != nil {
-				utils.Error("广播失败，移除连接", utils.F("player_id", pc.PlayerID), utils.F("error", err))
+				utils.Error("广播失败，移除连接", utils.F("room_id", r.ID), utils.F("player_id", pc.PlayerID), utils.F("error", err))
 				pc.Conn.Close()
 			}
 		}
@@ -264,7 +264,7 @@ func BroadcastToMatch(r *domain.Room) {
 			r,
 			pc,
 		); err != nil {
-			utils.Error("广播失败，关闭连接", utils.F("player_id", pc.PlayerID), utils.F("error", err))
+			utils.Error("广播失败，关闭连接", utils.F("room_id", r.ID), utils.F("player_id", pc.PlayerID), utils.F("error", err))
 			pc.Conn.Close()
 			pc.Online = false
 		}
