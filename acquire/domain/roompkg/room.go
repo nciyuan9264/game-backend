@@ -137,7 +137,7 @@ func MarkPlayerOffline(r *domain.Room, playerID string) (roomDeleted bool) {
 			}
 		}
 		delete(r.Connections, playerID)
-		utils.Info("玩家已从匹配队列中移除", utils.F("room_id", r.ID), utils.F("player_id", playerID))
+		utils.Info("玩家离开房间", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 	} else {
 		p, ok := r.Connections[playerID]
 		if !ok {
@@ -159,8 +159,8 @@ func MarkPlayerOffline(r *domain.Room, playerID string) (roomDeleted bool) {
 				p.OfflineTimer.Stop()
 			}
 
+			utils.Info("玩家离开房间,开始ai替换计时", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 			p.OfflineTimer = time.AfterFunc(2*time.Minute, func() {
-				utils.Info("开始计时", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 
 				// 再次检查玩家状态
 				player, ok := r.Connections[playerID]
@@ -195,15 +195,14 @@ func MarkPlayerOffline(r *domain.Room, playerID string) (roomDeleted bool) {
 // 玩家断开连接后，从房间中移除该连接
 func handleDisconnectCommand(r *domain.Room, cmd domain.Command) {
 	// 1️⃣ 通知 room：这个人掉线了
-	roomDeleted := MarkPlayerOffline(r, cmd.PlayerID)
+	MarkPlayerOffline(r, cmd.PlayerID)
 
 	// 2️⃣ 同步 Redis 房间状态（如果房间还在）
-	if !roomDeleted && r.State.RoomStatus != domain.RoomStatusMatch {
-		// roomInfo, err := data.GetRoomInfo(repository.Rdb, r.ID)
-		// data.SetRoomStatus(repository.Rdb, r.ID, false)
-		// r.State.RoomStatus = domain.RoomStatusMatch
-	}
-	utils.Info("玩家已从房间中移除", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID))
+	// if !roomDeleted && r.State.RoomStatus != domain.RoomStatusMatch {
+	// roomInfo, err := data.GetRoomInfo(repository.Rdb, r.ID)
+	// data.SetRoomStatus(repository.Rdb, r.ID, false)
+	// r.State.RoomStatus = domain.RoomStatusMatch
+	// }
 }
 
 // 获取房间中玩家数量
@@ -256,8 +255,6 @@ func handleConnectCommand(r *domain.Room, cmd domain.Command) {
 			return
 		}
 	} else {
-		utils.Info("玩家尝试加入房间（新玩家）", utils.F("room_id", r.ID), utils.F("player_id", playerID))
-
 		// 2️⃣ 状态校验
 		if r.State.RoomStatus != domain.RoomStatusMatch {
 			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"游戏已开始，无法加入"}`))
@@ -389,7 +386,7 @@ func HandleMatchBegin(r *domain.Room, cmd domain.Command) {
 
 	for playerID := range r.Connections {
 		data.InitPlayerData(r, playerID)
-		utils.Info("玩家加入房间", utils.F("room_id", r.ID), utils.F("player_id", playerID))
+		utils.Info("玩家进入游戏", utils.F("room_id", r.ID), utils.F("player_id", playerID))
 	}
 
 	// 更新房间状态为匹配中
@@ -514,7 +511,6 @@ func HandleReadyMessage(r *domain.Room, cmd domain.Command) {
 	maxPlayers := r.State.MaxPlayers
 	// 获取房间当前人数
 	playerCount := getRoomPlayerCount(r)
-	utils.Info("玩家加入", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("current_count", playerCount), utils.F("max_players", maxPlayers))
 
 	if playerCount == maxPlayers {
 		r.State.GameStartTime = time.Now()
@@ -541,6 +537,7 @@ func HandleReadyMessage(r *domain.Room, cmd domain.Command) {
 		}
 		// 更新房间状态为匹配中
 		if r.State.RoomStatus == domain.RoomStatusWaiting {
+			utils.Info("所有玩家进入游戏，开始游戏", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID))
 			r.State.RoomStatus = domain.RoomStatusSetTile
 		}
 	}

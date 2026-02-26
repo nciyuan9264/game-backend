@@ -82,4 +82,5 @@ type Room struct {
 	QuitCh chan struct{} `json:"-"`
 
 	DeleteTimer *time.Timer `json:"-"`
+	AIRunning   bool        `json:"-"`
 }

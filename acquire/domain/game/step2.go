@@ -19,7 +19,7 @@ func UpdateCompanyStockAndTiles(rdb *redis.Client, r *domain.Room, company strin
 		return fmt.Errorf("公司股票已售罄")
 	}
 	r.State.Companies[company].StockTotal--
-	utils.Info("公司已更新", utils.F("company", company), utils.F("stockTotal", r.State.Companies[company].StockTotal))
+	utils.Info("公司已更新", utils.F("room_id", r.ID), utils.F("company", company), utils.F("stockTotal", r.State.Companies[company].StockTotal))
 	return nil
 }
 

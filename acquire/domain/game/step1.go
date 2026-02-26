@@ -22,7 +22,7 @@ func placeTile(r *domain.Room, playerID, tileKey string) error {
 	r.State.Players[playerID].Tiles = utils.SafeSliceRemove(r.State.Players[playerID].Tiles, tileKey)
 	// Step 3: 设置LastTileKey
 	r.State.LastTileKey = tileKey
-	utils.Info("玩家放置棋子成功", utils.F("player_id", playerID), utils.F("tile_key", tileKey))
+	utils.Info("玩家放置棋子成功", utils.F("room_id", r.ID), utils.F("player_id", playerID), utils.F("tile_key", tileKey))
 	return nil
 }
 
@@ -139,7 +139,7 @@ func handleMergeProcess(
 	r.State.MergeMainCompany = mainHotel
 	r.State.MergeSettleData = tempSettleData
 	r.State.RoomStatus = domain.RoomStatusMergingSettle
-	utils.Info("完成酒店并入红利计算和状态更新", utils.F("other_hotel", otherHotel), utils.F("main_hotel", mainHotel))
+	utils.Info("完成酒店并入红利计算和状态更新", utils.F("room_id", r.ID), utils.F("other_hotel", otherHotel), utils.F("main_hotel", mainHotel))
 	return nil
 }
 
@@ -167,7 +167,7 @@ func HandlePostTilePlacement(rdb *redis.Client, ctx context.Context, r *domain.R
 	return nil
 }
 
-func handleMergingLogic(rdb *redis.Client, r *domain.Room, playerID string, hotelSet map[string]struct{}) error {
+func handleMergingLogic(r *domain.Room, hotelSet map[string]struct{}) error {
 	// 统计每个酒店的 tile 数量
 	hotelTileCount := make(map[string]int)
 	maxCount := 0
@@ -253,7 +253,7 @@ func checkTileTriggerRules(rdb *redis.Client, r *domain.Room, playerID string, t
 
 	if len(companySet) >= 2 {
 		utils.Warn("触发并购规则", utils.F("companies", companySet))
-		err := handleMergingLogic(rdb, r, playerID, companySet)
+		err := handleMergingLogic(r, companySet)
 		if err != nil {
 			return err
 		}
@@ -276,7 +276,7 @@ func checkTileTriggerRules(rdb *redis.Client, r *domain.Room, playerID string, t
 		// 统计公司 tiles 数量
 		connectedTiles = data.GetConnectedTiles(rdb, r, tileKey)
 		r.State.Companies[company].Tiles = len(connectedTiles)
-		utils.Info("公司数据已更新", utils.F("company", r.State.Companies[company]))
+		utils.Info("公司数据已更新", utils.F("room_id", r.ID), utils.F("company", r.State.Companies[company]))
 
 		err := HandlePostTilePlacement(repository.Rdb, repository.Ctx, r, playerID)
 		if err != nil {
@@ -533,12 +533,12 @@ func HandleCreateCompanyMessage(r *domain.Room, cmd domain.Command) {
 	utils.Info("收到 create_company 消息", utils.F("company", company))
 
 	if r.State.CurrentPlayer != cmd.PlayerID {
-		utils.Warn("不是当前玩家的回合", utils.F("player_id", cmd.PlayerID), utils.F("current_player", r.State.CurrentPlayer))
+		utils.Warn("不是当前玩家的回合", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("current_player", r.State.CurrentPlayer))
 		return
 	}
 
 	if r.State.RoomStatus != domain.RoomStatusCreateCompany {
-		utils.Warn("不是创建公司的状态")
+		utils.Warn("不是创建公司的状态", utils.F("room_id", r.ID))
 		return
 	}
 
@@ -547,12 +547,12 @@ func HandleCreateCompanyMessage(r *domain.Room, cmd domain.Command) {
 	connectedTiles := data.GetConnectedTiles(repository.Rdb, r, r.State.LastTileKey)
 	r.State.Companies[company].Tiles = len(connectedTiles)
 	r.State.Companies[company].StockTotal--
-	utils.Info("公司数据已更新", utils.F("company", company))
+	utils.Info("公司数据已更新", utils.F("room_id", r.ID), utils.F("company", company))
 
 	for _, tileKey := range connectedTiles {
 		tile, ok := r.State.BoardTiles[tileKey]
 		if !ok {
-			utils.Warn("tileKey 不存在，跳过", utils.F("tile_key", tileKey))
+			utils.Warn("tileKey 不存在，跳过", utils.F("room_id", r.ID), utils.F("tile_key", tileKey))
 			continue
 		}
 
@@ -565,11 +565,11 @@ func HandleCreateCompanyMessage(r *domain.Room, cmd domain.Command) {
 	// Step 3: 增加玩家的股票数据
 	playerStockKey := fmt.Sprintf("room:%s:player:%s:stocks", r.ID, cmd.PlayerID)
 	if err := repository.Rdb.HIncrBy(repository.Ctx, playerStockKey, company, 1).Err(); err != nil {
-		utils.Error("增加玩家股票失败", utils.F("player_id", cmd.PlayerID), utils.F("company", company), utils.F("error", err))
+		utils.Error("增加玩家股票失败", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("company", company), utils.F("error", err))
 		return
 	}
 	r.State.Players[cmd.PlayerID].Stocks[company]++
-	utils.Info("玩家获得股票", utils.F("player_id", cmd.PlayerID), utils.F("company", company), utils.F("count", 1))
+	utils.Info("玩家获得股票", utils.F("room_id", r.ID), utils.F("player_id", cmd.PlayerID), utils.F("company", company), utils.F("count", 1))
 
 	r.State.RoomStatus = domain.RoomStatusBuyStock
 }

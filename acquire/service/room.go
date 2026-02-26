@@ -9,18 +9,18 @@ import (
 
 func CreateRoom(userID string) (string, error) {
 	timePrefix := time.Now().Format("0102_150405")
-	roomID := timePrefix
+	room_id := timePrefix
 
-	newRoom := roompkg.NewRoomService(roomID, userID)
+	newRoom := roompkg.NewRoomService(room_id, userID)
 
 	roompkg.RoomLock.Lock()
-	roompkg.Rooms[roomID] = newRoom
+	roompkg.Rooms[room_id] = newRoom
 	roompkg.RoomLock.Unlock()
 
 	go newRoom.Run()
 
-	utils.Info("房间已创建", utils.F("roomID", roomID))
-	return roomID, nil
+	utils.Info("房间已创建", utils.F("room_id", room_id))
+	return room_id, nil
 }
 
 func GetRoomList() ([]dto.RoomInfo, error) {

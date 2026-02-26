@@ -63,9 +63,8 @@ func NewRealConn(conn *websocket.Conn) *RealConn {
 	}
 }
 
-type RoomStatus string
-
 // 玩家连接对象结构体
+type RoomStatus string
 
 const (
 	RoomStatusMatch            RoomStatus = "match"            // 初始化房间状态

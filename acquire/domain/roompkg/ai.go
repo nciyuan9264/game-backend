@@ -230,13 +230,18 @@ func MaybeRunAIIfNeeded(r *domain.Room, message []byte) bool {
 
 		if r.Connections[currentPlayerID].AI {
 			isAI = true
-			utils.Info("检测到被替换为AI的玩家", utils.F("room_id", r.ID), utils.F("player_id", currentPlayerID))
 		}
 
 		if !isAI {
 			utils.Info("当前玩家 %s 不是 AI 玩家", utils.F("player_id", currentPlayerID))
 			return false
 		}
+	}
+
+	// 检查是否已经有 AI 行动在运行，防止多个 AI 玩家同时触发
+	if r.AIRunning {
+		utils.Info("AI 行动已在运行中，跳过重复触发", utils.F("room_id", r.ID), utils.F("player_id", playerId))
+		return false
 	}
 
 	// 提取临时数据（合并选择）
@@ -291,10 +296,16 @@ func MaybeRunAIIfNeeded(r *domain.Room, message []byte) bool {
 		utils.Error("所有 tile 已被使用", utils.F("room_id", r.ID), utils.F("player_id", playerId))
 	}
 
+	// 标记 AI 行动已开始
+	r.AIRunning = true
 	utils.Info("当前是 AI 玩家的回合，准备延迟执行 AI 行动", utils.F("room_id", r.ID), utils.F("player_id", playerId), utils.F("game_status", gameStatus))
 
 	// ---------- 在协程中延迟执行 ----------
 	go func() {
+		defer func() {
+			// 无论如何都要重置标志
+			r.AIRunning = false
+		}()
 		time.Sleep(5 * time.Second)
 
 		conn := &VirtualConn{Room: r}

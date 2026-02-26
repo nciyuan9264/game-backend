@@ -187,7 +187,7 @@ func BroadcastToRoom(r *domain.Room) {
 
 		if tileCount >= 41 {
 			gameShouldEnd = true
-			utils.Info("游戏结束：公司[%s]的 tile 数量[%d] >= 41", utils.F("company", company), utils.F("tile_count", tileCount))
+			utils.Info("游戏结束：公司[%s]的 tile 数量[%d] >= 41", utils.F("room_id", r.ID), utils.F("company", company), utils.F("tile_count", tileCount))
 			break
 		}
 
@@ -198,7 +198,7 @@ func BroadcastToRoom(r *domain.Room) {
 
 	if !gameShouldEnd && allCompaniesAbove11 && totalTiles > 90 {
 		gameShouldEnd = true
-		utils.Info("游戏结束：每个公司 tile 都 > 11 且 tile 被公司占用总数[%d] > 90", utils.F("total_tiles", totalTiles))
+		utils.Info("游戏结束：每个公司 tile 都 > 11 且 tile 被公司占用总数[%d] > 90", utils.F("room_id", r.ID), utils.F("total_tiles", totalTiles))
 	}
 
 	if gameShouldEnd {
@@ -243,8 +243,6 @@ func BroadcastToRoom(r *domain.Room) {
 	}
 
 	for _, pc := range r.Connections {
-		utils.Info("向玩家 %s 发送同步消息", utils.F("player_id", pc.PlayerID), utils.F("pc.AI", pc.AI))
-
 		if pc.Online {
 			// 尝试发送消息
 			if err := SyncRoomMessage(pc.Conn, r, pc, result); err != nil {

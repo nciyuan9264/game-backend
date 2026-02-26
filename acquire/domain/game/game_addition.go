@@ -6,7 +6,6 @@ import (
 	"go-game/domain/data"
 	"go-game/domain/domain"
 	"go-game/utils"
-	"math/rand/v2"
 	"sort"
 	"time"
 
@@ -55,7 +54,8 @@ func SwitchToNextPlayer(r *domain.Room, currentPlayerID string) error {
 	r.State.CurrentPlayer = nextPlayerID
 
 	utils.Info(
-		"房间 %s 当前玩家切换为: %s",
+		"房间当前玩家切换",
+		utils.F("current_player_id", currentPlayerID),
 		utils.F("room_id", r.ID),
 		utils.F("next_player_id", nextPlayerID),
 	)
@@ -108,13 +108,11 @@ func HandleRestartGameMessage(r *domain.Room, cmd domain.Command) {
 	for _, pc := range r.Connections {
 		playerID := pc.PlayerID
 		// 2. 设置初始资金
-		allTiles, err := data.GenerateAvailableTiles(r)
+		playerTiles, err := data.GenerateAvailableTiles(r, 5)
 		if err != nil {
 			utils.Error("生成可用 tile 失败", utils.F("error", err))
 			return
 		}
-		rand.Shuffle(len(allTiles), func(i, j int) { allTiles[i], allTiles[j] = allTiles[j], allTiles[i] })
-		playerTiles := utils.SafeSlice(allTiles, 5)
 
 		r.State.Players[playerID] = &domain.PlayerState{
 			Money: 6000,
@@ -175,5 +173,5 @@ func HandleRestartGameMessage(r *domain.Room, cmd domain.Command) {
 			StockPrice: 200,
 		},
 	}
-	r.State.GameStartTime = time.Now()
+	r.State.GameStartTime = time.Time{}
 }
