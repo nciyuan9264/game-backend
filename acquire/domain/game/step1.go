@@ -68,7 +68,7 @@ func handleMergeProcess(
 			currentCompanyHoders = append(currentCompanyHoders, holder.PlayerID)
 		}
 
-		company, ok := utils.ParseCompanyType(mainHotel)
+		company, ok := utils.ParseCompanyType(hotel)
 		if !ok {
 			return nil // 或报错
 		}

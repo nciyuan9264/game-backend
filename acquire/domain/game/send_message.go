@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"go-game/domain/domain"
 	"go-game/dto"
-	"go-game/entities"
 	"go-game/repository"
 	"go-game/utils"
 	"os"
@@ -41,29 +40,13 @@ func getGameLogFilePath(roomID string) string {
 	return path.Join("./game_logs", fileName)
 }
 
-func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[string]interface{}) {
+func WriteGameLog(roomID, playerID string, data []byte) {
 	go func() {
 		logPath := getGameLogFilePath(roomID)
 
 		// 确保目录存在
 		if err := os.MkdirAll(path.Dir(logPath), 0755); err != nil {
 			utils.Error("创建日志目录失败", utils.F("room_id", roomID), utils.F("log_path", logPath), utils.F("error", err))
-			return
-		}
-
-		entry := map[string]interface{}{
-			"timestamp":  time.Now().Format("2006-01-02 15:04:05"),
-			"result":     msg["result"],
-			"roomInfo":   roomInfo,
-			"playerID":   playerID,
-			"playerData": msg["playerData"],
-			"roomData":   msg["roomData"],
-			"tempData":   msg["tempData"],
-		}
-
-		jsonEntry, err := json.Marshal(entry)
-		if err != nil {
-			utils.Error("序列化日志 entry 失败", utils.F("error", err))
 			return
 		}
 
@@ -74,9 +57,9 @@ func WriteGameLog(roomID, playerID string, roomInfo *entities.RoomInfo, msg map[
 		}
 		defer f.Close()
 
-		jsonEntry = append(jsonEntry, ',')
+		data = append(data, ',')
 
-		if _, err := f.Write(jsonEntry); err != nil {
+		if _, err := f.Write(data); err != nil {
 			utils.Error("写入日志失败", utils.F("room_id", roomID), utils.F("log_path", logPath), utils.F("error", err))
 			return
 		}
@@ -123,9 +106,9 @@ func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.Pl
 	if err != nil {
 		return fmt.Errorf("❌ 编码 JSON 失败: %w", err)
 	}
-	// if pc.PlayerID == currentPlayer {
-	// 	WriteGameLog(room.ID, pc.PlayerID, roomInfo, msg)
-	// }
+	if pc.PlayerID == room.State.CurrentPlayer {
+		WriteGameLog(room.ID, pc.PlayerID, data)
+	}
 	return conn.WriteMessage(websocket.TextMessage, data)
 }
 

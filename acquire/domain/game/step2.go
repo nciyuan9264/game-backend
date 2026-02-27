@@ -54,16 +54,6 @@ func UpdatePlayerStockAndMoney(
 	// 原地修改股票数量
 	player.Stocks[company] += stockCount
 
-	utils.Info(
-		"玩家数据已更新",
-		utils.F("room_id", r.ID),
-		utils.F("player_id", playerID),
-		utils.F("company", company),
-		utils.F("stock_count", stockCount),
-		utils.F("total_price", totalPrice),
-		utils.F("money_after", player.Money),
-	)
-
 	return nil
 }
 
