@@ -1,14 +1,30 @@
-FROM golang:1.23-alpine
+# ---------- 构建阶段 ----------
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 
-COPY . .
+# 只拷贝依赖文件（利用缓存）
+COPY go.mod go.sum ./
 
-# 使用国内代理解决 go mod tidy 网络超时问题
 ENV GOPROXY=https://goproxy.cn,direct
 
-RUN go mod tidy
-RUN go build -o app main.go
+RUN go mod download
+
+# 再拷贝源码
+COPY . .
+
+# 构建静态二进制（极小）
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags="-s -w" -o app main.go
+
+
+# ---------- 运行阶段 ----------
+FROM alpine:3.20
+
+WORKDIR /app
+
+# 只复制编译结果
+COPY --from=builder /app/app .
 
 EXPOSE 8000
 
