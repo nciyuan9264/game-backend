@@ -14,13 +14,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 登录华为云 SWR
-      - name: Login to Huawei Cloud SWR
+      # 登录腾讯云 TCR
+      - name: Login to Tencent Cloud TCR
         uses: docker/login-action@v3
         with:
-          registry: ${{ secrets.SWR_ENDPOINT }}
-          username: ${{ secrets.SWR_USERNAME }}
-          password: ${{ secrets.SWR_PASSWORD }}
+          registry: ${{ secrets.TCR_LOGIN_SERVER }}
+          username: ${{ secrets.TCR_USERNAME }}
+          password: ${{ secrets.TCR_PASSWORD }}
 
       # 自动生成 tag
       - name: Set image tag
@@ -31,29 +31,29 @@ jobs:
       - name: Build acquire docker image
         run: |
           export DOCKER_BUILDKIT=0
-          docker build -t ${{ secrets.SWR_ENDPOINT }}/gamebus/acquire:latest \
-                       -t ${{ secrets.SWR_ENDPOINT }}/gamebus/acquire:${{ steps.vars.outputs.IMAGE_TAG }} \
+          docker build -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/acquire:latest \
+                       -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/acquire:${{ steps.vars.outputs.IMAGE_TAG }} \
                        ./acquire
 
       # 构建 splendor 镜像
       - name: Build splendor docker image
         run: |
           export DOCKER_BUILDKIT=0
-          docker build -t ${{ secrets.SWR_ENDPOINT }}/gamebus/splendor:latest \
-                       -t ${{ secrets.SWR_ENDPOINT }}/gamebus/splendor:${{ steps.vars.outputs.IMAGE_TAG }} \
+          docker build -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/splendor:latest \
+                       -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/splendor:${{ steps.vars.outputs.IMAGE_TAG }} \
                        ./splendor
 
       # 推送 acquire 镜像
       - name: Push acquire images
         run: |
-          docker push ${{ secrets.SWR_ENDPOINT }}/gamebus/acquire:latest
-          docker push ${{ secrets.SWR_ENDPOINT }}/gamebus/acquire:${{ steps.vars.outputs.IMAGE_TAG }}
+          docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/acquire:latest
+          docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/acquire:${{ steps.vars.outputs.IMAGE_TAG }}
 
       # 推送 splendor 镜像
       - name: Push splendor images
         run: |
-          docker push ${{ secrets.SWR_ENDPOINT }}/gamebus/splendor:latest
-          docker push ${{ secrets.SWR_ENDPOINT }}/gamebus/splendor:${{ steps.vars.outputs.IMAGE_TAG }}
+          docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/splendor:latest
+          docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/splendor:${{ steps.vars.outputs.IMAGE_TAG }}
 
   deploy:
     runs-on: ubuntu-latest
