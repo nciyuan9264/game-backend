@@ -89,7 +89,7 @@ func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.Pl
 		"roomData": map[string]interface{}{
 			"companyInfo":   room.State.Companies,
 			"currentPlayer": room.State.CurrentPlayer,
-			"roomInfo":      room.State,
+			"gameStatus":    room.State.RoomStatus,
 			"tiles":         room.State.BoardTiles,
 			"players":       playersInfo,
 		},
@@ -126,13 +126,10 @@ func SyncMatchMessage(conn domain.WriteOnlyConn, r *domain.Room, pc *domain.Play
 	msg := dto.WsMatchSyncData{
 		Type:     "MATCH_SYNC",
 		RoomID:   r.ID,
+		OwnerID:  r.State.OwnerID,
+		Status:   r.State.RoomStatus,
 		PlayerID: pc.PlayerID,
-		Room: dto.RoomStruct{
-			RoomID:  r.ID,
-			OwnerID: r.State.OwnerID,
-			Status:  r.State.RoomStatus,
-			Players: playersInfo,
-		},
+		Players:  playersInfo,
 	}
 
 	// ------- JSON 编码 -------

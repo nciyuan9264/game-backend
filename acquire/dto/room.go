@@ -30,17 +30,12 @@ type GetRoomList struct {
 	Rooms []RoomInfo `json:"rooms"`
 }
 
-type RoomStruct struct {
-	RoomID  string                `json:"roomID"`
-	OwnerID string                `json:"ownerID"`
-	Status  domain.RoomStatus     `json:"status"`
-	Players map[string]RoomPlayer `json:"players"`
-}
-
 type WsMatchSyncData struct {
-	Type     string     `json:"type"`
-	RoomID   string     `json:"roomID"`
-	PlayerID string     `json:"playerID"`
-	Room     RoomStruct `json:"room"`
-	Message  string     `json:"message"`
+	Type     string                `json:"type"`
+	RoomID   string                `json:"roomID"`
+	OwnerID  string                `json:"ownerID"`
+	Status   domain.RoomStatus     `json:"status"`
+	PlayerID string                `json:"playerID"`
+	Players  map[string]RoomPlayer `json:"players"`
+	Message  string                `json:"message"`
 }
