@@ -1,4 +1,4 @@
-name: Deploy to Huaweiyun Server
+name: Deploy to Tengxun Server
 
 on:
   push:
