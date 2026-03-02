@@ -209,12 +209,7 @@ func MaybeRunAIIfNeeded(r *domain.Room, message []byte) bool {
 	}
 
 	// 提取当前状态
-	roomInfo, ok := roomData["roomInfo"].(map[string]interface{})
-	if !ok {
-		return false
-	}
-
-	gameStatusStr, ok := roomInfo["roomStatus"].(string)
+	gameStatusStr, ok := roomData["gameStatus"].(string)
 	if !ok || gameStatusStr == "" {
 		return false
 	}
