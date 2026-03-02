@@ -86,6 +86,7 @@ func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.Pl
 		"result":     result,
 		"playerId":   pc.PlayerID,
 		"playerData": room.State.Players[pc.PlayerID],
+		"ownerID":    room.State.OwnerID,
 		"roomData": map[string]interface{}{
 			"companyInfo":   room.State.Companies,
 			"currentPlayer": room.State.CurrentPlayer,
