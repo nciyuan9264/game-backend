@@ -160,19 +160,19 @@ func BroadcastToRoom(r *domain.Room) {
 	companyInfoMap := r.State.Companies
 
 	allTileMap := make(map[string]int)
+	totalTiles := 0
 	for _, tile := range r.State.BoardTiles {
-		if tile.Belong != "" && tile.Belong != "Blank" {
-			allTileMap[tile.Belong] = allTileMap[tile.Belong] + 1
+		if tile.Belong != "" {
+			totalTiles++
+			if tile.Belong != "Blank" {
+				allTileMap[tile.Belong] = allTileMap[tile.Belong] + 1
+			}
 		}
 	}
 
 	gameShouldEnd := false
-	totalTiles := 0
 	allCompaniesAbove11 := true
-
 	for company, tileCount := range allTileMap {
-		totalTiles += tileCount
-
 		if tileCount >= 41 {
 			gameShouldEnd = true
 			utils.Info("游戏结束：公司的 tile 数量 >= 41", utils.F("room_id", r.ID), utils.F("company", company), utils.F("tile_count", tileCount))
