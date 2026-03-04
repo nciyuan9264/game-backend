@@ -70,7 +70,7 @@ func WriteGameLog(roomID, playerID string, data []byte) {
 }
 
 // 向该客户端发送同步消息
-func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.PlayerConn, result map[string]int) error {
+func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.PlayerConn, result map[string]interface{}) error {
 	// ------- 组装消息 -------
 	playersInfo := make(map[string]interface{}, 0)
 	for _, p := range room.Connections {
@@ -81,9 +81,16 @@ func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.Pl
 		}
 	}
 
+	var resultValue interface{}
+	if room.State.RoomStatus == domain.RoomStatusEnd {
+		resultValue = result
+	} else {
+		resultValue = nil
+	}
+
 	msg := map[string]interface{}{
 		"type":       "ROOM_SYNC",
-		"result":     result,
+		"result":     resultValue,
 		"playerId":   pc.PlayerID,
 		"playerData": room.State.Players[pc.PlayerID],
 		"ownerID":    room.State.OwnerID,
@@ -214,12 +221,16 @@ func BroadcastToRoom(r *domain.Room) {
 
 	r.State.Companies = companyInfoMap
 
-	result := make(map[string]int)
+	result := make(map[string]interface{})
 	for _, pc := range r.Connections {
 		if playerInfo, ok := r.State.Players[pc.PlayerID]; ok && playerInfo != nil {
 			playerStocks := playerInfo.Stocks
 			money := playerInfo.Money
-			result[pc.PlayerID] = CalculateTotalValue(playerStocks, companyInfoMap) + money
+			result[pc.PlayerID] = map[string]interface{}{
+				"money":  money,
+				"stocks": CalculateTotalValue(playerStocks, companyInfoMap),
+				"total":  CalculateTotalValue(playerStocks, companyInfoMap) + money,
+			}
 		}
 	}
 
