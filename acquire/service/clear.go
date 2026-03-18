@@ -7,43 +7,51 @@ import (
 	"time"
 )
 
-func ScheduleWeeklyRoomReset() {
+func ScheduleDailyRoomReset() {
 	for {
-		duration := durationUntilNextMonday4AM()
+		duration := durationUntilNext4AM()
 		fmt.Printf("距离下次清空还有：%v\n", duration)
 
 		time.Sleep(duration)
 
-		// 清空 Rooms
 		fmt.Println("⏰ 清空房间 Rooms")
 		clearRooms()
 	}
 }
 
-func durationUntilNextMonday4AM() time.Duration {
+// 计算距离下一个“今天/明天 4:00”的时间
+func durationUntilNext4AM() time.Duration {
 	now := time.Now()
-	// 计算距离下周一的天数差
-	daysUntilMonday := int(time.Monday - now.Weekday())
-	if daysUntilMonday <= 0 {
-		daysUntilMonday += 7
+
+	// 今天 4:00
+	today4 := time.Date(
+		now.Year(),
+		now.Month(),
+		now.Day(),
+		4, 0, 0, 0,
+		now.Location(),
+	)
+
+	var next time.Time
+
+	if now.Before(today4) {
+		// 还没到今天4点
+		next = today4
+	} else {
+		// 已经过了今天4点 → 明天4点
+		next = today4.Add(24 * time.Hour)
 	}
 
-	// 设置为下周一的4点
-	next := time.Date(now.Year(), now.Month(), now.Day()+daysUntilMonday, 4, 0, 0, 0, now.Location())
-
-	// 检查是否已经过了本周一的4点，如果是则设置为下周的4点
-	if now.After(next) {
-		next = next.Add(7 * 24 * time.Hour)
-	}
-	return next.Sub(now)
+	return time.Until(next)
 }
 
 func clearRooms() {
-	// 清空 map 的方式
+	// ⚠️ 如果有并发访问，这里必须加锁
 	for k := range roompkg.Rooms {
 		delete(roompkg.Rooms, k)
 	}
-	err := repository.Rdb.FlushDB(repository.Ctx).Err() // 清空当前数据库
+
+	err := repository.Rdb.FlushDB(repository.Ctx).Err()
 	if err != nil {
 		fmt.Println("清空 Redis 失败:", err)
 	} else {

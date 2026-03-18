@@ -19,7 +19,7 @@ func CreateRoom(userID string) (string, error) {
 
 	go newRoom.Run()
 
-	utils.Info("房间已创建", utils.F("room_id", room_id))
+	utils.Info("房间已创建", utils.F("room_id", room_id), utils.F("userID", userID))
 	return room_id, nil
 }
 
