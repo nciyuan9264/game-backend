@@ -29,8 +29,12 @@ func InitRouter(r *gin.Engine) {
 	history := r.Group("/history")
 	history.Use(auth.JWTMiddlewareViaAuthCenter(authCenterURL))
 	{
+		var store historyctl.HistoryStore
+		if roompkg.HistoryRepo != nil {
+			store = roompkg.HistoryRepo
+		}
 		historyOpts := historyctl.Options{
-			Store:           roompkg.HistoryRepo,
+			Store:           store,
 			DefaultGameType: "davinci",
 		}
 		history.GET("/games", historyctl.MakeListGamesHandler(historyOpts))
@@ -40,8 +44,12 @@ func InitRouter(r *gin.Engine) {
 
 	ranking := r.Group("/ranking")
 	{
+		var store historyctl.HistoryStore
+		if roompkg.HistoryRepo != nil {
+			store = roompkg.HistoryRepo
+		}
 		rankingOpts := historyctl.Options{
-			Store:           roompkg.HistoryRepo,
+			Store:           store,
 			DefaultGameType: "davinci",
 		}
 		ranking.GET("/leaderboard", historyctl.MakeLeaderboardHandler(rankingOpts))
