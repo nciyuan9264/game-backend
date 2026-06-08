@@ -27,33 +27,39 @@ jobs:
         id: vars
         run: echo "IMAGE_TAG=$(echo ${GITHUB_SHA} | head -c7)" >> $GITHUB_OUTPUT
 
+      # 构建 davinci 镜像
+      - name: Build davinci docker image
+        run: |
+          export DOCKER_BUILDKIT=0
+          docker build \
+            --build-arg GAME=davinci \
+            -f deployments/Dockerfile \
+            -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/davinci:latest \
+            -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/davinci:${{ steps.vars.outputs.IMAGE_TAG }} \
+            .
+
       # 构建 acquire 镜像
       - name: Build acquire docker image
         run: |
           export DOCKER_BUILDKIT=0
-          docker build -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/acquire:latest \
-                       -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/acquire:${{ steps.vars.outputs.IMAGE_TAG }} \
-                       ./acquire
+          docker build \
+            --build-arg GAME=acquire \
+            -f deployments/Dockerfile \
+            -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/acquire:latest \
+            -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/acquire:${{ steps.vars.outputs.IMAGE_TAG }} \
+            .
 
-      # 构建 splendor 镜像
-      - name: Build splendor docker image
+      # 推送 davinci 镜像
+      - name: Push davinci images
         run: |
-          export DOCKER_BUILDKIT=0
-          docker build -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/splendor:latest \
-                       -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/splendor:${{ steps.vars.outputs.IMAGE_TAG }} \
-                       ./splendor
+          docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/davinci:latest
+          docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/davinci:${{ steps.vars.outputs.IMAGE_TAG }}
 
       # 推送 acquire 镜像
       - name: Push acquire images
         run: |
           docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/acquire:latest
           docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/acquire:${{ steps.vars.outputs.IMAGE_TAG }}
-
-      # 推送 splendor 镜像
-      - name: Push splendor images
-        run: |
-          docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/splendor:latest
-          docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/splendor:${{ steps.vars.outputs.IMAGE_TAG }}
 
   deploy:
     runs-on: ubuntu-latest
