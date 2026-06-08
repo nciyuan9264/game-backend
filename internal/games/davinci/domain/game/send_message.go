@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/nciyuan9264/game-backend/internal/games/davinci/domain/domain"
-	"github.com/nciyuan9264/game-backend/internal/games/davinci/dto"
 	"github.com/nciyuan9264/game-backend/internal/games/davinci/repository"
 	"github.com/nciyuan9264/game-backend/pkg/logger"
+	"github.com/nciyuan9264/game-backend/pkg/roomctl/dto"
 
 	"github.com/gorilla/websocket"
 )
@@ -175,7 +175,7 @@ func SyncMatchMessage(conn domain.WriteOnlyConn, r *domain.Room, pc *domain.Play
 		Type:     "MATCH_SYNC",
 		RoomID:   r.ID,
 		OwnerID:  r.State.OwnerID,
-		Status:   r.State.RoomStatus,
+		Status:   string(r.State.RoomStatus),
 		PlayerID: pc.PlayerID,
 		Players:  playersInfo,
 	}

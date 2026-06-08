@@ -4,8 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/nciyuan9264/game-backend/internal/games/splendor/dto"
 	"github.com/nciyuan9264/game-backend/internal/games/splendor/service"
+	"github.com/nciyuan9264/game-backend/pkg/roomctl/dto"
 )
 
 // DeleteRoom splendor 特有：清理 Redis 中的房间相关 key。

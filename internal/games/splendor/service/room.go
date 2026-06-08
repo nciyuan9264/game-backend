@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/nciyuan9264/game-backend/internal/games/splendor/domain/roompkg"
-	"github.com/nciyuan9264/game-backend/internal/games/splendor/dto"
 	"github.com/nciyuan9264/game-backend/pkg/logger"
 	"github.com/nciyuan9264/game-backend/pkg/roomctl"
+	"github.com/nciyuan9264/game-backend/pkg/roomctl/dto"
 )
 
 const defaultMaxPlayers = 4
@@ -65,7 +65,7 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 			RoomID:     roomID,
 			OwnerID:    rs.Room.State.OwnerID,
 			MaxPlayers: rs.Room.State.MaxPlayers,
-			Status:     rs.Room.State.RoomStatus,
+			Status:     string(rs.Room.State.RoomStatus),
 			RoomPlayer: players,
 		})
 	}

@@ -4,9 +4,9 @@ import (
 	"time"
 
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/roompkg"
-	"github.com/nciyuan9264/game-backend/internal/games/acquire/dto"
 	"github.com/nciyuan9264/game-backend/pkg/logger"
 	"github.com/nciyuan9264/game-backend/pkg/roomctl"
+	"github.com/nciyuan9264/game-backend/pkg/roomctl/dto"
 )
 
 func CreateRoom(userID string) (string, error) {
@@ -61,7 +61,7 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 		room := dto.RoomInfo{
 			RoomID:         roomID,
 			OwnerID:        roomConnInfo.Room.State.OwnerID,
-			Status:         roomConnInfo.Room.State.RoomStatus,
+			Status:         string(roomConnInfo.Room.State.RoomStatus),
 			RoomPlayer:     roomPlayers,
 			EmptyTileCount: emptyTileCount,
 		}
