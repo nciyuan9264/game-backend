@@ -2,3 +2,4 @@
 __debug_*
 kafka-data/
 .env
+.trae/

@@ -1,17 +1,17 @@
 {
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "name": "Air Dev",
-      "type": "go",
-      "request": "launch",
-      "mode": "auto",
-      "env": {
-        "REDIS_ADDR": "localhost:6379"
-      },
-      "program": "${workspaceFolder}/splendor",
-      "args": [],
-      "preLaunchTask": "Start Air"
-    }
-  ]
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Air Dev",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "env": {
+                "REDIS_ADDR": "localhost:6379"
+            },
+            "program": "${workspaceFolder}/splendor",
+            "args": [],
+            "preLaunchTask": "Start Air"
+        }
+    ]
 }

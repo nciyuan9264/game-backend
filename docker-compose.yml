@@ -1,29 +1,112 @@
 services:
-  acquire:
-    container_name: backend-acquire
+  # acquire:
+  #   container_name: backend-acquire
+  #   build:
+  #     context: ./acquire
+  #   environment:
+  #     - REDIS_ADDR=redis:6379
+  #     - REDIS_DB=0
+  #   volumes:
+  #     - /var/log/acquire:/app/game_logs
+  #   networks:
+  #     - global-network
+  #   restart: always
+
+  # splendor:
+  #   container_name: backend-splendor
+  #   build:
+  #     context: ./splendor
+  #   environment:
+  #     - REDIS_ADDR=redis:6379
+  #     - REDIS_DB=1
+  #   volumes:
+  #     - /var/log/splendor:/app/game_logs
+  #   networks:
+  #     - global-network
+  #   restart: always
+
+  # da_vinci_code:
+  #   container_name: backend-da_vinci_code
+  #   build:
+  #     context: ./da_vinci_code
+  #   environment:
+  #     - REDIS_ADDR=redis:6379
+  #     - REDIS_DB=0
+  #   volumes:
+  #     - /var/log/da_vinci_code:/app/game_logs
+  #   networks:
+  #     - global-network
+  #   restart: always
+  #   ports:
+  #     - 8000:8000
+
+  # acquire-v2:
+  #   container_name: backend-acquire-v2
+  #   build:
+  #     context: .
+  #     dockerfile: deployments/Dockerfile
+  #     args:
+  #       GAME: acquire
+  #   environment:
+  #     - REDIS_ADDR=redis:6379
+  #     - REDIS_DB=0
+  #     - POSTGRES_DSN=${POSTGRES_DSN}
+  #   volumes:
+  #     - /var/log/acquire:/app/game_logs
+  #   networks:
+  #     - global-network
+  #   depends_on:
+  #     - redis
+  #   ports:
+  #     - '8000:8000'
+  #   restart: always
+
+  davinci-v2:
+    container_name: backend-davinci-v2
     build:
-      context: ./acquire
+      context: .
+      dockerfile: deployments/Dockerfile
+      args:
+        GAME: davinci
     environment:
       - REDIS_ADDR=redis:6379
       - REDIS_DB=0
+      - POSTGRES_DSN=${POSTGRES_DSN}
     volumes:
-      - /var/log/acquire:/app/game_logs
+      - /var/log/da_vinci_code:/app/game_logs
+    networks:
+      - global-network
+    depends_on:
+      - redis
+    ports:
+      - '8000:8000'
+    restart: always
+
+  # splendor-v2:
+  #   container_name: backend-splendor-v2
+  #   build:
+  #     context: .
+  #     dockerfile: deployments/Dockerfile
+  #     args:
+  #       GAME: splendor
+  #   environment:
+  #     - REDIS_ADDR=redis:6379
+  #     - REDIS_DB=1
+  #   volumes:
+  #     - /var/log/splendor:/app/game_logs
+  #   networks:
+  #     - global-network
+  #   restart: always
+
+  redis:
+    container_name: backend-redis
+    image: redis:7
+    ports:
+      - '6379:6379'
     networks:
       - global-network
     restart: always
 
-  splendor:
-    container_name: backend-splendor
-    build:
-      context: ./splendor
-    environment:
-      - REDIS_ADDR=redis:6379
-      - REDIS_DB=1
-    volumes:
-      - /var/log/splendor:/app/game_logs
-    networks:
-      - global-network
-    restart: always
 
 networks:
   global-network:
