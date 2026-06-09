@@ -233,14 +233,14 @@ func buildSnapshot(r *domain.Room, state *domain.GameState, base *roomcore.Base,
 	snap := &Snapshot{
 		Seq:         targetSeq,
 		TotalEvents: len(events),
-		RoomData: map[string]interface{}{
+		RoomData: cloneStateMap(map[string]interface{}{
 			"companyInfo":   state.Companies,
 			"currentPlayer": state.CurrentPlayer,
 			"gameStatus":    state.RoomStatus,
 			"tiles":         state.BoardTiles,
 			"players":       playersInfo,
-		},
-		PlayersData: playersData,
+		}),
+		PlayersData: cloneStateMap(playersData),
 		Result:      result,
 	}
 
@@ -255,6 +255,21 @@ func buildSnapshot(r *domain.Room, state *domain.GameState, base *roomcore.Base,
 	}
 
 	return snap
+}
+
+// cloneStateMap 通过 JSON 往返做一次深拷贝，切断快照与仍在被回放循环持续 mutate 的
+// state（state.Companies / state.BoardTiles / state.Players 指针）之间的引用，
+// 否则 ReplayAll 返回的所有帧会共享同一份 state，最终全部渲染成最后一回合的数据。
+func cloneStateMap(m map[string]interface{}) map[string]interface{} {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return m
+	}
+	out := map[string]interface{}{}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return m
+	}
+	return out
 }
 
 // applyEvent 把单条事件应用到 Room 上。直接复用 game 包内现有的命令处理函数。
