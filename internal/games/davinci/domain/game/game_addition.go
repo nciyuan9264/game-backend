@@ -124,6 +124,12 @@ func HandleTurnTimeoutMessage(r *domain.Room, cmd domain.Command) {
 	if r == nil || r.State == nil {
 		return
 	}
+	if r.State.RoomStatus == domain.RoomStatusEnd {
+		logger.Info("游戏已结束，忽略 turn_timeout",
+			logger.F("room_id", r.ID),
+			logger.F("cmd_player", cmd.PlayerID))
+		return
+	}
 	if r.State.CurrentPlayer != cmd.PlayerID {
 		logger.Info("turn_timeout 已过期，忽略",
 			logger.F("room_id", r.ID),

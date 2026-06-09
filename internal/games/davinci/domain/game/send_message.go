@@ -112,7 +112,7 @@ func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.Pl
 					"color": c.Color,
 					"index": c.Index,
 				}
-				if c.IsRevealed {
+				if c.IsRevealed || room.State.RoomStatus == domain.RoomStatusEnd {
 					item["num"] = c.Num
 				}
 				cardList = append(cardList, item)

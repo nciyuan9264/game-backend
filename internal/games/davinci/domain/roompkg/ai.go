@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
 	"sort"
 	"time"
 
@@ -615,6 +616,9 @@ func MaybeRunAIIfNeeded(r *domain.Room, message []byte) bool {
 		return false
 	}
 	gameStatus := domain.RoomStatus(gameStatusStr)
+	if gameStatus == domain.RoomStatusEnd {
+		return false
+	}
 
 	playerId, ok := msg["playerId"].(string)
 	if !ok || playerId == "" || playerId != currentPlayerID {
@@ -638,7 +642,8 @@ func MaybeRunAIIfNeeded(r *domain.Room, message []byte) bool {
 		defer func() {
 			r.AIRunning = false
 		}()
-		time.Sleep(1200 * time.Millisecond)
+		// 随机思考 2~4 秒，让 AI 行为更自然
+		time.Sleep(time.Duration(2000+rand.Intn(2001)) * time.Millisecond)
 
 		cmdType, payload, ok := buildAIActionMsg(r, currentPlayerID, gameStatus)
 		if !ok {
