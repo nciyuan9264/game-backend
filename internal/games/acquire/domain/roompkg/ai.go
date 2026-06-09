@@ -535,6 +535,10 @@ func buildAIActionMsg(r *domain.Room, playerID string, status domain.RoomStatus,
 		}
 		selection := chooseMergingSelectionForAI(r, playerID, mainCompany)
 		if selection == "" {
+			// 兜底：从已创建公司里挑一个 Tiles>0 的，保证能继续推进。
+			selection = anyActiveCompany(r)
+		}
+		if selection == "" {
 			return "", nil, false
 		}
 		data, err := json.Marshal(map[string]interface{}{"mainCompany": selection})
@@ -549,9 +553,30 @@ func buildAIActionMsg(r *domain.Room, playerID string, status domain.RoomStatus,
 			return "", nil, false
 		}
 		return "game_merging_settle", data, true
+	case domain.RoomStatusMerging:
+		// merging 是过渡态，正常会被 handler 立刻切走；落到此处说明状态机异常，交给系统级兜底。
+		return "", nil, false
 	default:
 		return "", nil, false
 	}
+}
+
+// anyActiveCompany 兜底：从已创建（Tiles>0）的公司里取一个名字（按字典序）。
+func anyActiveCompany(r *domain.Room) string {
+	if r == nil || r.State == nil || r.State.Companies == nil {
+		return ""
+	}
+	names := make([]string, 0, len(r.State.Companies))
+	for name, info := range r.State.Companies {
+		if info != nil && info.Tiles > 0 {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	return names[0]
 }
 
 // BuildTurnTimeoutCommand 思考超时时由 roomcore 调用。
@@ -559,7 +584,13 @@ func buildAIActionMsg(r *domain.Room, playerID string, status domain.RoomStatus,
 func BuildTurnTimeoutCommand(r *domain.Room, playerID string) (roomcore.Command, bool) {
 	cmdType, payload, ok := buildAIActionMsg(r, playerID, r.State.RoomStatus, nil)
 	if !ok {
-		return roomcore.Command{}, false
+		// 兜底：发出 turn_timeout 强制切人，避免房间永久卡死。
+		return roomcore.Command{
+			Type:     "turn_timeout",
+			PlayerID: playerID,
+			Payload:  []byte("{}"),
+			Conn:     &VirtualConn{Room: r},
+		}, true
 	}
 	return roomcore.Command{
 		Type:     cmdType,
@@ -682,7 +713,16 @@ func MaybeRunAIIfNeeded(r *domain.Room, message []byte) bool {
 
 		cmdType, payload, ok := buildAIActionMsg(r, playerId, gameStatus, mainCompany)
 		if !ok {
-			logger.Warn("AI 未生成有效动作", logger.F("room_id", r.ID), logger.F("player_id", playerId), logger.F("game_status", gameStatus))
+			logger.Warn("AI 未生成有效动作，发送 turn_timeout 兜底",
+				logger.F("room_id", r.ID),
+				logger.F("player_id", playerId),
+				logger.F("game_status", gameStatus))
+			r.CmdCh <- domain.Command{
+				Type:     "turn_timeout",
+				PlayerID: playerId,
+				Payload:  []byte("{}"),
+				Conn:     &VirtualConn{Room: r},
+			}
 			return
 		}
 		logger.Info("AI 发送消息", logger.F("room_id", r.ID), logger.F("player_id", playerId), logger.F("type", cmdType), logger.F("payload", string(payload)))

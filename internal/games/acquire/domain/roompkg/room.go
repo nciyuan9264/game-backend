@@ -91,6 +91,8 @@ func (r *RoomService) handleCommand(cmd domain.Command) {
 		game.HandleBuyStockMessage(r.Room, cmd)
 	case "game_merging_selection":
 		game.HandleMergingSelectionMessage(r.Room, cmd)
+	case "turn_timeout":
+		game.HandleTurnTimeoutMessage(r.Room, cmd)
 	case "game_play_audio":
 		game.HandlePlayAudioMessage(r.Room, cmd)
 	case "game_restart_game":

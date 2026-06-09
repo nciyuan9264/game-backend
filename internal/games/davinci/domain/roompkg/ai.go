@@ -462,11 +462,15 @@ func chooseSetForAI(r *domain.Room, playerID string) (string, int, bool) {
 }
 
 // buildAIActionMsg 根据当前 RoomStatus 选出"AI/超时"应当投递的命令 type+payload。
-// 返回 ok=false 表示该状态下没有可投递的动作。
+// 返回 ok=false 表示该状态下没有可投递的动作；调用方应在收到 ok=false 时
+// 走 turn_timeout 兜底路径，避免房间死锁。
 func buildAIActionMsg(r *domain.Room, playerID string, status domain.RoomStatus) (cmdType string, payload []byte, ok bool) {
 	switch status {
 	case domain.RoomStatusGetCard:
 		cardID := chooseCardToGet(r, playerID)
+		if cardID == "" {
+			cardID = anyBoardCardID(r)
+		}
 		if cardID == "" {
 			return "", nil, false
 		}
@@ -478,7 +482,15 @@ func buildAIActionMsg(r *domain.Room, playerID string, status domain.RoomStatus)
 	case domain.RoomStatusGuessCard:
 		opt, ok := bestGuessOption(r, playerID)
 		if !ok {
-			return "", nil, false
+			id, num, fallback := anyOpponentHiddenCard(r, playerID)
+			if !fallback {
+				return "", nil, false
+			}
+			data, err := json.Marshal(map[string]interface{}{"id": id, "num": num})
+			if err != nil {
+				return "", nil, false
+			}
+			return "game_guess_card", data, true
 		}
 		data, err := json.Marshal(map[string]interface{}{
 			"id":  opt.cardID,
@@ -514,12 +526,65 @@ func buildAIActionMsg(r *domain.Room, playerID string, status domain.RoomStatus)
 	}
 }
 
+// anyBoardCardID 兜底：从 BoardCards 中取任一非空 ID（按字典序保证确定性）。
+func anyBoardCardID(r *domain.Room) string {
+	if r == nil || r.State == nil || len(r.State.BoardCards) == 0 {
+		return ""
+	}
+	ids := make([]string, 0, len(r.State.BoardCards))
+	for id, c := range r.State.BoardCards {
+		if c == nil {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return ""
+	}
+	sort.Strings(ids)
+	return ids[0]
+}
+
+// anyOpponentHiddenCard 兜底：从对手未翻开的牌中任取一张，num 取 Num1。
+// 错猜也是一个合法动作，能继续推进游戏（自身翻牌 + 切人）。
+func anyOpponentHiddenCard(r *domain.Room, playerID string) (string, domain.CardNumber, bool) {
+	if r == nil || r.State == nil || r.State.Players == nil {
+		return "", 0, false
+	}
+	pids := make([]string, 0, len(r.State.Players))
+	for pid := range r.State.Players {
+		pids = append(pids, pid)
+	}
+	sort.Strings(pids)
+	for _, pid := range pids {
+		if pid == playerID {
+			continue
+		}
+		ps := r.State.Players[pid]
+		if ps == nil {
+			continue
+		}
+		for _, c := range ps.Cards {
+			if c != nil && !c.IsRevealed {
+				return c.ID, domain.Num1, true
+			}
+		}
+	}
+	return "", 0, false
+}
+
 // BuildTurnTimeoutCommand 思考超时时由 roomcore 调用。
 // 与 MaybeRunAIIfNeeded 共用 buildAIActionMsg，但 PlayerID 用真实玩家 ID，且不修改身份。
 func BuildTurnTimeoutCommand(r *domain.Room, playerID string) (roomcore.Command, bool) {
 	cmdType, payload, ok := buildAIActionMsg(r, playerID, r.State.RoomStatus)
 	if !ok {
-		return roomcore.Command{}, false
+		// 兜底：发出 turn_timeout 强制切人，避免房间永久卡死。
+		return roomcore.Command{
+			Type:     "turn_timeout",
+			PlayerID: playerID,
+			Payload:  []byte("{}"),
+			Conn:     &VirtualConn{Room: r},
+		}, true
 	}
 	return roomcore.Command{
 		Type:     cmdType,
@@ -577,7 +642,16 @@ func MaybeRunAIIfNeeded(r *domain.Room, message []byte) bool {
 
 		cmdType, payload, ok := buildAIActionMsg(r, currentPlayerID, gameStatus)
 		if !ok {
-			logger.Warn("AI 未生成有效动作", logger.F("room_id", r.ID), logger.F("player_id", currentPlayerID), logger.F("game_status", gameStatus))
+			logger.Warn("AI 未生成有效动作，发送 turn_timeout 兜底",
+				logger.F("room_id", r.ID),
+				logger.F("player_id", currentPlayerID),
+				logger.F("game_status", gameStatus))
+			r.CmdCh <- domain.Command{
+				Type:     "turn_timeout",
+				PlayerID: playerId,
+				Payload:  []byte("{}"),
+				Conn:     &VirtualConn{Room: r},
+			}
 			return
 		}
 

@@ -105,6 +105,7 @@ func (r *Recorder) Commit(ctx context.Context, in CommitInput) (int64, error) {
 			r.players[i].FinalScore = fp.FinalScore
 			r.players[i].FinalMoney = fp.FinalMoney
 			r.players[i].FinalStocks = fp.FinalStocks
+			r.players[i].FinalRank = fp.FinalRank
 			r.players[i].IsWinner = fp.IsWinner
 		}
 	}

@@ -68,6 +68,35 @@ type PlayAudioPayload struct {
 	AudioType string `json:"audioType"`
 }
 
+// HandleTurnTimeoutMessage 在 AI/超时无法生成有效动作时由系统投递，
+// 用于强制把回合推进到下一个玩家，避免房间死锁。
+// 只有当命令携带的 PlayerID 仍是当前玩家时才生效，避免新回合被旧 timeout 影响。
+// 兜底统一把房间切到 SetTile 状态（acquire 每轮的起点）。
+func HandleTurnTimeoutMessage(r *domain.Room, cmd domain.Command) {
+	if r == nil || r.State == nil {
+		return
+	}
+	if r.State.CurrentPlayer != cmd.PlayerID {
+		logger.Info("turn_timeout 已过期，忽略",
+			logger.F("room_id", r.ID),
+			logger.F("cmd_player", cmd.PlayerID),
+			logger.F("current_player", r.State.CurrentPlayer))
+		return
+	}
+	logger.Warn("turn_timeout 兜底切人",
+		logger.F("room_id", r.ID),
+		logger.F("player_id", cmd.PlayerID),
+		logger.F("status", r.State.RoomStatus))
+	if err := SwitchToNextPlayer(r, cmd.PlayerID); err != nil {
+		logger.Error("turn_timeout 切人失败", logger.F("room_id", r.ID), logger.F("error", err))
+		return
+	}
+	r.State.RoomStatus = domain.RoomStatusSetTile
+	r.State.MergeMainCompany = ""
+	r.State.MergeSettleData = nil
+	r.State.MergingSelection = domain.MergingSelection{}
+}
+
 func HandlePlayAudioMessage(r *domain.Room, cmd domain.Command) {
 	var p PlayAudioPayload
 	if err := json.Unmarshal(cmd.Payload, &p); err != nil {

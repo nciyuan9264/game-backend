@@ -69,6 +69,8 @@ func (r *RoomService) handleCommand(cmd domain.Command) {
 		game.HandleGuessCardMessage(r.Room, cmd)
 	case "game_set_card":
 		game.HandleSetCardMessage(r.Room, cmd)
+	case "turn_timeout":
+		game.HandleTurnTimeoutMessage(r.Room, cmd)
 	case "game_play_audio":
 		game.HandlePlayAudioMessage(r.Room, cmd)
 	case "game_restart_game":
