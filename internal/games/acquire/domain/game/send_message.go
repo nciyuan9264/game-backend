@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/domain"
-	"github.com/nciyuan9264/game-backend/internal/games/acquire/repository"
 	"github.com/nciyuan9264/game-backend/pkg/logger"
 	"github.com/nciyuan9264/game-backend/pkg/roomctl/dto"
 
@@ -28,22 +27,19 @@ func CalculateTotalValue(playerStocks map[string]int, companyInfoMap map[string]
 	return totalValue
 }
 
-func getGameLogFilePath(roomID string) string {
-	// 建议你在房间初始化时设置一个 startTime 或 gameID
-	// 这里假设你用启动时间生成文件名
-	startKey := fmt.Sprintf("room:%s:game_start_time", roomID)
-	startTimeStr, err := repository.Rdb.Get(repository.Ctx, startKey).Result()
-	if err != nil {
-		startTimeStr = time.Now().Format("20060102_150405") // fallback
-		repository.Rdb.Set(repository.Ctx, startKey, time.Now().Format("20060102_150405"), 0)
+func getGameLogFilePath(r *domain.Room) string {
+	startTimeStr := time.Now().Format("20060102_150405")
+	if r != nil && r.State != nil && !r.State.GameStartTime.IsZero() {
+		startTimeStr = r.State.GameStartTime.Format("20060102_150405")
 	}
-	fileName := fmt.Sprintf("%s_%s.json", roomID, startTimeStr)
+	fileName := fmt.Sprintf("%s_%s.json", r.ID, startTimeStr)
 	return path.Join("./game_logs", fileName)
 }
 
-func WriteGameLog(roomID, playerID string, data []byte) {
+func WriteGameLog(r *domain.Room, playerID string, data []byte) {
 	go func() {
-		logPath := getGameLogFilePath(roomID)
+		logPath := getGameLogFilePath(r)
+		roomID := r.ID
 
 		// 确保目录存在
 		if err := os.MkdirAll(path.Dir(logPath), 0755); err != nil {
@@ -123,7 +119,7 @@ func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.Pl
 		return fmt.Errorf("❌ 编码 JSON 失败: %w", err)
 	}
 	if pc.PlayerID == room.State.CurrentPlayer {
-		WriteGameLog(room.ID, pc.PlayerID, data)
+		WriteGameLog(room, pc.PlayerID, data)
 	}
 	return conn.WriteMessage(websocket.TextMessage, data)
 }

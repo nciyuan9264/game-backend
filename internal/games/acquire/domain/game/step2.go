@@ -1,19 +1,15 @@
 package game
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/domain"
-	"github.com/nciyuan9264/game-backend/internal/games/acquire/repository"
 	"github.com/nciyuan9264/game-backend/pkg/logger"
-
-	"github.com/go-redis/redis/v8"
 )
 
 // UpdateCompanyStockAndTiles 更新公司数据（stockTotal 减少）
-func UpdateCompanyStockAndTiles(rdb *redis.Client, r *domain.Room, company string) error {
+func UpdateCompanyStockAndTiles(r *domain.Room, company string) error {
 
 	// 更新 stockTotal（每次只减1）
 	if r.State.Companies[company].StockTotal <= 0 {
@@ -26,8 +22,6 @@ func UpdateCompanyStockAndTiles(rdb *redis.Client, r *domain.Room, company strin
 
 // UpdatePlayerStockAndMoney 更新玩家数据
 func UpdatePlayerStockAndMoney(
-	rdb *redis.Client,
-	ctx context.Context,
 	r *domain.Room,
 	playerID string,
 	company string,
@@ -98,7 +92,7 @@ func HandleBuyStockMessage(r *domain.Room, cmd domain.Command) {
 	for company, countVal := range stocks {
 		count := countVal
 		for i := 0; i < count; i++ {
-			if err := UpdateCompanyStockAndTiles(repository.Rdb, r, company); err != nil {
+			if err := UpdateCompanyStockAndTiles(r, company); err != nil {
 				logger.Error("更新公司失败", logger.F("room_id", r.ID), logger.F("player_id", cmd.PlayerID), logger.F("company", company), logger.F("error", err))
 				return
 			}
@@ -108,13 +102,13 @@ func HandleBuyStockMessage(r *domain.Room, cmd domain.Command) {
 	// 再统一扣钱 & 更新玩家股票
 	for company, countVal := range stocks {
 		count := countVal
-		if err := UpdatePlayerStockAndMoney(repository.Rdb, repository.Ctx, r, cmd.PlayerID, company, count, priceMap[company]*count); err != nil {
+		if err := UpdatePlayerStockAndMoney(r, cmd.PlayerID, company, count, priceMap[company]*count); err != nil {
 			logger.Error("更新玩家失败", logger.F("room_id", r.ID), logger.F("player_id", cmd.PlayerID), logger.F("company", company), logger.F("error", err))
 			return
 		}
 	}
 
-	err := GiveRandomTileToPlayer(repository.Rdb, repository.Ctx, r, cmd.PlayerID)
+	err := GiveRandomTileToPlayer(r, cmd.PlayerID)
 	if err != nil {
 		logger.Warn("发牌失败", logger.F("room_id", r.ID), logger.F("player_id", cmd.PlayerID), logger.F("error", err))
 	}

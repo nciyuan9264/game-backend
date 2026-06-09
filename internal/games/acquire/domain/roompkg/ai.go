@@ -9,7 +9,6 @@ import (
 
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/data"
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/domain"
-	"github.com/nciyuan9264/game-backend/internal/games/acquire/repository"
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/utils"
 	"github.com/nciyuan9264/game-backend/pkg/arrayutil"
 	"github.com/nciyuan9264/game-backend/pkg/logger"
@@ -311,7 +310,7 @@ func chooseCompanyForAI(r *domain.Room) string {
 	// 当 LastTileKey 所在的 Blank 连通块较大时，优先选 Premium 公司（奖金跨档更大）
 	predictedSize := 0
 	if r.State.LastTileKey != "" {
-		predictedSize = len(data.GetConnectedTiles(repository.Rdb, r, r.State.LastTileKey))
+		predictedSize = len(data.GetConnectedTiles(r, r.State.LastTileKey))
 	}
 	if predictedSize >= 6 && len(p1) > 0 {
 		return p1[0]

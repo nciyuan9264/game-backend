@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/nciyuan9264/game-backend/internal/games/davinci/domain/roompkg"
-	"github.com/nciyuan9264/game-backend/internal/games/davinci/repository"
 	"github.com/nciyuan9264/game-backend/internal/games/davinci/router"
 	"github.com/nciyuan9264/game-backend/internal/games/davinci/service"
 	"github.com/nciyuan9264/game-backend/pkg/database"
@@ -10,7 +9,6 @@ import (
 )
 
 func main() {
-	repository.InitRedis()
 	database.InitPostgres()
 	roompkg.InitHistoryRepo()
 

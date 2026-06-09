@@ -38,20 +38,39 @@ func InitPlayerData(r *domain.Room, playerID string) error {
 		return fmt.Errorf("生成可用 cards 失败: %w", err)
 	}
 
-	sort.Slice(cards, func(i, j int) bool {
-		if cards[i].Num != cards[j].Num {
-			return cards[i].Num < cards[j].Num
+	// 非王牌按数字升序、同数字黑色在前排序；王牌(-1)可置于任意位置，随机插入。
+	normal := make([]*domain.Card, 0, len(cards))
+	jokers := make([]*domain.Card, 0)
+	for _, card := range cards {
+		if card.Num == domain.NumMinus1 {
+			jokers = append(jokers, card)
+		} else {
+			normal = append(normal, card)
+		}
+	}
+
+	sort.Slice(normal, func(i, j int) bool {
+		if normal[i].Num != normal[j].Num {
+			return normal[i].Num < normal[j].Num
 		}
 		ri := 0
-		if cards[i].Color == domain.ColorWhite {
+		if normal[i].Color == domain.ColorWhite {
 			ri = 1
 		}
 		rj := 0
-		if cards[j].Color == domain.ColorWhite {
+		if normal[j].Color == domain.ColorWhite {
 			rj = 1
 		}
 		return ri < rj
 	})
+
+	for _, joker := range jokers {
+		pos := rand.Intn(len(normal) + 1)
+		normal = append(normal, nil)
+		copy(normal[pos+1:], normal[pos:])
+		normal[pos] = joker
+	}
+	cards = normal
 
 	for idx, card := range cards {
 		card.Index = idx

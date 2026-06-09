@@ -7,7 +7,6 @@ import (
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/domain"
 	"github.com/nciyuan9264/game-backend/pkg/arrayutil"
 
-	"github.com/go-redis/redis/v8"
 	"golang.org/x/exp/rand"
 )
 
@@ -44,7 +43,7 @@ func GenerateAvailableTiles(room *domain.Room, count int) ([]string, error) {
 }
 
 // GetConnectedTiles 用于从 tileKey 开始，递归查找相邻、归属一致的 tile
-func GetConnectedTiles(rdb *redis.Client, r *domain.Room, startTileKey string) []string {
+func GetConnectedTiles(r *domain.Room, startTileKey string) []string {
 	visited := make(map[string]bool)
 	queue := []string{startTileKey}
 	var connected []string

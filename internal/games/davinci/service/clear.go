@@ -3,7 +3,6 @@ package service
 import (
 	"fmt"
 	"github.com/nciyuan9264/game-backend/internal/games/davinci/domain/roompkg"
-	"github.com/nciyuan9264/game-backend/internal/games/davinci/repository"
 	"time"
 )
 
@@ -42,10 +41,5 @@ func clearRooms() {
 	for k := range roompkg.Rooms.Snapshot() {
 		roompkg.Rooms.Delete(k)
 	}
-	err := repository.Rdb.FlushDB(repository.Ctx).Err() // 清空当前数据库
-	if err != nil {
-		fmt.Println("清空 Redis 失败:", err)
-	} else {
-		fmt.Println("✅ Redis 已清空")
-	}
+	fmt.Println("✅ Rooms 已清空")
 }

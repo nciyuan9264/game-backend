@@ -1,7 +1,6 @@
 package game
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,12 +8,9 @@ import (
 
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/data"
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/domain"
-	"github.com/nciyuan9264/game-backend/internal/games/acquire/repository"
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/utils"
 	"github.com/nciyuan9264/game-backend/pkg/arrayutil"
 	"github.com/nciyuan9264/game-backend/pkg/logger"
-
-	"github.com/go-redis/redis/v8"
 )
 
 // PlaceTile 用于处理将棋子放置到棋盘上：修改 tile 的 belong 字段并更新 Redis，同时从玩家手牌中移除该 tile。
@@ -146,7 +142,7 @@ func handleMergeProcess(
 	return nil
 }
 
-func HandlePostTilePlacement(rdb *redis.Client, ctx context.Context, r *domain.Room, playerID string) error {
+func HandlePostTilePlacement(r *domain.Room, playerID string) error {
 	// 第一步：获取公司信息
 	companyInfo := r.State.Companies
 
@@ -159,7 +155,7 @@ func HandlePostTilePlacement(rdb *redis.Client, ctx context.Context, r *domain.R
 		}
 	}
 	// 发一张 tile
-	if err := GiveRandomTileToPlayer(rdb, repository.Ctx, r, playerID); err != nil {
+	if err := GiveRandomTileToPlayer(r, playerID); err != nil {
 		return fmt.Errorf("发牌失败: %w", err)
 	}
 
@@ -237,7 +233,7 @@ func handleMergingLogic(r *domain.Room, hotelSet map[string]struct{}) error {
 }
 
 // 检查是否有创建、并购、扩建规则触发
-func checkTileTriggerRules(rdb *redis.Client, r *domain.Room, playerID string, tileKey string) error {
+func checkTileTriggerRules(r *domain.Room, playerID string, tileKey string) error {
 	adjTiles := data.GetAdjacentTileKeys(tileKey)
 	companySet := make(map[string]struct{})
 	blankTileCount := 0
@@ -271,17 +267,17 @@ func checkTileTriggerRules(rdb *redis.Client, r *domain.Room, playerID string, t
 		}
 		company := hotelList[0]
 
-		connectedTiles := data.GetConnectedTiles(rdb, r, tileKey)
+		connectedTiles := data.GetConnectedTiles(r, tileKey)
 		for _, tileKeyBlank := range connectedTiles {
 			r.State.BoardTiles[tileKeyBlank] = &domain.Tile{ID: tileKeyBlank, Belong: company}
 		}
 
 		// 统计公司 tiles 数量
-		connectedTiles = data.GetConnectedTiles(rdb, r, tileKey)
+		connectedTiles = data.GetConnectedTiles(r, tileKey)
 		r.State.Companies[company].Tiles = len(connectedTiles)
 		logger.Info("公司数据已更新", logger.F("room_id", r.ID), logger.F("company", r.State.Companies[company]))
 
-		err := HandlePostTilePlacement(repository.Rdb, repository.Ctx, r, playerID)
+		err := HandlePostTilePlacement(r, playerID)
 		if err != nil {
 			logger.Warn("处理玩家放置 tile 后逻辑失败", logger.F("error", err))
 		}
@@ -309,7 +305,7 @@ func checkTileTriggerRules(rdb *redis.Client, r *domain.Room, playerID string, t
 		return nil
 	}
 
-	err := HandlePostTilePlacement(repository.Rdb, repository.Ctx, r, playerID)
+	err := HandlePostTilePlacement(r, playerID)
 	if err != nil {
 		logger.Warn("处理玩家放置 tile 后逻辑失败", logger.F("error", err))
 	}
@@ -346,7 +342,7 @@ func HandlePlaceTileMessage(r *domain.Room, cmd domain.Command) {
 		return
 	}
 	// Step2: 检查 创建公司/并购公司
-	err = checkTileTriggerRules(repository.Rdb, r, cmd.PlayerID, tileKey)
+	err = checkTileTriggerRules(r, cmd.PlayerID, tileKey)
 	if err != nil {
 		logger.Error("检查棋子规则失败", logger.F("room_id", r.ID), logger.F("player_id", cmd.PlayerID), logger.F("error", err))
 		return
@@ -484,7 +480,7 @@ func HandleMergingSettleMessage(r *domain.Room, cmd domain.Command) {
 	if allHodersCleared {
 		lastTile := r.State.LastTileKey
 
-		connTile := data.GetConnectedTiles(repository.Rdb, r, lastTile)
+		connTile := data.GetConnectedTiles(r, lastTile)
 		connTileSet := make(map[string]struct{})
 		for _, id := range connTile {
 			connTileSet[id] = struct{}{}
@@ -547,7 +543,7 @@ func HandleCreateCompanyMessage(r *domain.Room, cmd domain.Command) {
 
 	logger.Info("创建公司使用的 tileKey", logger.F("tile_key", r.State.LastTileKey))
 	// 统计公司 tiles 数量
-	connectedTiles := data.GetConnectedTiles(repository.Rdb, r, r.State.LastTileKey)
+	connectedTiles := data.GetConnectedTiles(r, r.State.LastTileKey)
 	r.State.Companies[company].Tiles = len(connectedTiles)
 	r.State.Companies[company].StockTotal--
 	logger.Info("公司数据已更新", logger.F("room_id", r.ID), logger.F("company", company))
@@ -566,11 +562,6 @@ func HandleCreateCompanyMessage(r *domain.Room, cmd domain.Command) {
 		r.State.BoardTiles[tileKey] = tile
 	}
 	// Step 3: 增加玩家的股票数据
-	playerStockKey := fmt.Sprintf("room:%s:player:%s:stocks", r.ID, cmd.PlayerID)
-	if err := repository.Rdb.HIncrBy(repository.Ctx, playerStockKey, company, 1).Err(); err != nil {
-		logger.Error("增加玩家股票失败", logger.F("room_id", r.ID), logger.F("player_id", cmd.PlayerID), logger.F("company", company), logger.F("error", err))
-		return
-	}
 	r.State.Players[cmd.PlayerID].Stocks[company]++
 	logger.Info("玩家获得股票", logger.F("room_id", r.ID), logger.F("player_id", cmd.PlayerID), logger.F("company", company), logger.F("count", 1))
 

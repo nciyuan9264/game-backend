@@ -13,7 +13,7 @@ import (
 var DB *gorm.DB
 
 // InitPostgres 从环境变量 POSTGRES_DSN 读取连接串并初始化全局 *gorm.DB。
-// 与 pkg/redisclient.InitRedis 风格保持一致：失败直接 os.Exit(1)。
+// 失败直接 os.Exit(1)。
 func InitPostgres() {
 	dsn := os.Getenv("POSTGRES_DSN")
 	if dsn == "" {

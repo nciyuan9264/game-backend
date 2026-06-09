@@ -2,9 +2,9 @@ package service
 
 import (
 	"fmt"
-	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/roompkg"
-	"github.com/nciyuan9264/game-backend/internal/games/acquire/repository"
 	"time"
+
+	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/roompkg"
 )
 
 func ScheduleDailyRoomReset() {
@@ -49,11 +49,5 @@ func clearRooms() {
 	for k := range roompkg.Rooms.Snapshot() {
 		roompkg.Rooms.Delete(k)
 	}
-
-	err := repository.Rdb.FlushDB(repository.Ctx).Err()
-	if err != nil {
-		fmt.Println("清空 Redis 失败:", err)
-	} else {
-		fmt.Println("✅ Redis 已清空")
-	}
+	fmt.Println("✅ Rooms 已清空")
 }
