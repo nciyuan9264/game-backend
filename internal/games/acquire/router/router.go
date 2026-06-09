@@ -42,6 +42,7 @@ func InitRouter(r *gin.Engine) {
 		history.GET("/games", historyctl.MakeListGamesHandler(historyOpts))
 		history.GET("/game/:id", historyctl.MakeGameDetailHandler(historyOpts))
 		history.GET("/game/:id/snapshot", historyctl.MakeSnapshotHandler(historyOpts))
+		history.GET("/game/:id/snapshots", service.HistoryGameSnapshots)
 		history.GET("/stats", historyctl.MakeStatsHandler(historyOpts))
 	}
 

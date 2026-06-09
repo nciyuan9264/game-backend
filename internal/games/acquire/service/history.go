@@ -52,3 +52,41 @@ func HistoryGameSnapshot(c *gin.Context) {
 		"data":        snap,
 	})
 }
+
+// HistoryGameSnapshots GET /history/game/:id/snapshots
+// 一次性返回该局所有回合的快照数组，前端拉取一次即可在本地平滑切换，无需逐帧请求。
+func HistoryGameSnapshots(c *gin.Context) {
+	if roompkg.HistoryRepo == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "history disabled"})
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	g, players, events, err := roompkg.HistoryRepo.Detail(c.Request.Context(), id, "acquire")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if g == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+
+	snaps, err := replay.ReplayAll(g, players, events)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status_code": http.StatusOK,
+		"message":     "ok",
+		"data": gin.H{
+			"totalEvents": len(events),
+			"snapshots":   snaps,
+		},
+	})
+}
