@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nciyuan9264/game-backend/internal/games/davinci/domain/domain"
+	"github.com/nciyuan9264/game-backend/internal/games/davinci/domain/game"
 	"github.com/nciyuan9264/game-backend/pkg/logger"
 	"github.com/nciyuan9264/game-backend/pkg/roomcore"
 )
@@ -407,58 +408,7 @@ func chooseSetForAI(r *domain.Room, playerID string) (string, int, bool) {
 	if target == nil {
 		return "", 0, false
 	}
-	type item struct {
-		id    string
-		color domain.Color
-		num   domain.CardNumber
-		index int
-	}
-	var others []item
-	for _, c := range ps.Cards {
-		if c == nil || c.ID == target.ID {
-			continue
-		}
-		others = append(others, item{
-			id:    c.ID,
-			color: c.Color,
-			num:   c.Num,
-			index: c.Index,
-		})
-	}
-	sort.Slice(others, func(i, j int) bool {
-		if others[i].num != others[j].num {
-			return others[i].num < others[j].num
-		}
-		ri := 0
-		if others[i].color == domain.ColorWhite {
-			ri = 1
-		}
-		rj := 0
-		if others[j].color == domain.ColorWhite {
-			rj = 1
-		}
-		return ri < rj
-	})
-	pos := 0
-	for i := 0; i < len(others); i++ {
-		if target.Num < others[i].num {
-			break
-		}
-		if target.Num == others[i].num {
-			ti := 0
-			if target.Color == domain.ColorWhite {
-				ti = 1
-			}
-			oi := 0
-			if others[i].color == domain.ColorWhite {
-				oi = 1
-			}
-			if ti < oi {
-				break
-			}
-		}
-		pos++
-	}
+	pos := game.ComputeInsertIndex(ps.Cards, target)
 	return target.ID, pos, true
 }
 

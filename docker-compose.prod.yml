@@ -1,0 +1,26 @@
+services:
+  acquire:
+    image: sgccr.ccs.tencentyun.com/tengxuntcr/acquire:latest
+    container_name: backend-acquire
+    environment:
+      - POSTGRES_DSN=${POSTGRES_DSN}
+    volumes:
+      - /var/log/acquire:/app/game_logs
+    networks:
+      - global-network
+    restart: always
+
+  davinci:
+    image: sgccr.ccs.tencentyun.com/tengxuntcr/davinci:latest
+    container_name: backend-davinci
+    environment:
+      - POSTGRES_DSN=${POSTGRES_DSN}
+    volumes:
+      - /var/log/davinci:/app/game_logs
+    networks:
+      - global-network
+    restart: always
+
+networks:
+  global-network:
+    external: true

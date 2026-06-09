@@ -11,6 +11,41 @@ type HandleGetCardPayload struct {
 	ID string `json:"id"`
 }
 
+// ComputeInsertIndex 返回新数字牌应插入的 index：
+// 按当前实际 Index 顺序，跳过王牌(num=-1)，找到第一张严格大于 newCard
+// 的数字牌，返回它的 Index；若不存在则返回末尾槽位。
+// 调用方随后需把所有 Index >= 返回值的牌 +1，再把 newCard.Index 设为返回值。
+func ComputeInsertIndex(cards []*domain.Card, newCard *domain.Card) int {
+	count := 0
+	pos := -1
+	for _, c := range cards {
+		if c == nil || c.ID == newCard.ID {
+			continue
+		}
+		count++
+		if c.Num == domain.NumMinus1 {
+			continue
+		}
+		if cardOrderLess(newCard.Num, newCard.Color, c.Num, c.Color) {
+			if pos == -1 || c.Index < pos {
+				pos = c.Index
+			}
+		}
+	}
+	if pos == -1 {
+		return count
+	}
+	return pos
+}
+
+// cardOrderLess 数字升序、同数字黑牌在白牌前：a 是否应排在 b 之前。
+func cardOrderLess(numA domain.CardNumber, colorA domain.Color, numB domain.CardNumber, colorB domain.Color) bool {
+	if numA != numB {
+		return numA < numB
+	}
+	return colorA == domain.ColorBlack && colorB == domain.ColorWhite
+}
+
 // HandleGetCardMessage 用于处理玩家获取牌的操作
 func HandleGetCardMessage(r *domain.Room, cmd domain.Command) error {
 	var p HandleGetCardPayload
@@ -103,29 +138,7 @@ func HandleGuessCardMessage(r *domain.Room, cmd domain.Command) error {
 		}
 		if newCard != nil {
 			newCard.IsRevealed = true
-			pos := 0
-			for _, c := range ps.Cards {
-				if c == nil || c.ID == newCard.ID {
-					continue
-				}
-				if c.Num < newCard.Num {
-					pos++
-					continue
-				}
-				if c.Num == newCard.Num {
-					oi := 0
-					if c.Color == domain.ColorWhite {
-						oi = 1
-					}
-					ti := 0
-					if newCard.Color == domain.ColorWhite {
-						ti = 1
-					}
-					if oi < ti {
-						pos++
-					}
-				}
-			}
+			pos := ComputeInsertIndex(ps.Cards, newCard)
 			for _, c := range ps.Cards {
 				if c == nil || c.ID == newCard.ID {
 					continue
