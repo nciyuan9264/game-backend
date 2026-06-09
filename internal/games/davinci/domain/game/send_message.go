@@ -108,9 +108,10 @@ func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.Pl
 				}
 				logger.Info("对手牌", logger.F("room_id", room.ID), logger.F("player_id", pid), logger.F("card", c))
 				item := map[string]interface{}{
-					"id":    c.ID,
-					"color": c.Color,
-					"index": c.Index,
+					"id":         c.ID,
+					"color":      c.Color,
+					"index":      c.Index,
+					"isRevealed": c.IsRevealed,
 				}
 				if c.IsRevealed || room.State.RoomStatus == domain.RoomStatusEnd {
 					item["num"] = c.Num
