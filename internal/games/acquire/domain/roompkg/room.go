@@ -24,7 +24,7 @@ type RoomService struct {
 	HistoryEnded     bool
 }
 
-const MaxPlayers = 6
+const MaxPlayers = domain.DefaultMaxPlayers
 
 var Rooms = roomcore.NewRegistry[*RoomService]()
 

@@ -33,6 +33,8 @@ type CompanyState struct {
 	StockTotal int    `json:"stockTotal"`
 	StockPrice int    `json:"stockPrice"`
 }
+const DefaultMaxPlayers = 6
+
 type GameState struct {
 	CurrentPlayer string     `json:"currentPlayer"`
 	GameStartTime time.Time  `json:"gameStartTime"`

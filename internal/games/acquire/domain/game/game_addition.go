@@ -130,6 +130,8 @@ func HandleRestartGameMessage(r *domain.Room, cmd domain.Command) {
 	r.State.LastTileKey = ""
 	// 重置游戏状态
 	r.State.RoomStatus = domain.RoomStatusMatch
+	// 恢复 MaxPlayers 为房间初始上限，下一次 match_begin 时会按实际人数重写
+	r.State.MaxPlayers = domain.DefaultMaxPlayers
 	// 重置tiles
 	for tileKey, tileInfo := range r.State.BoardTiles {
 		tileInfo.Belong = ""
