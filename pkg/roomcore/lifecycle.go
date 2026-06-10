@@ -7,75 +7,86 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// startDelayedDelete 当房间无在线真人时，启动 10 秒后删除房间的定时器。
-func startDelayedDelete[R any](s *Service[R]) {
-	if s.Base.DeleteTimer != nil {
+const (
+	healthCheckInterval = 60 * time.Second
+	maxNoHumanChecks    = 3 // 连续 3 次无真人则删房（约 180s）
+)
+
+// StartHealthCheck 在房间主循环启动时创建周期健康检查 ticker。
+// 实际的计数与删除判定在房间主 goroutine 的 select 中调用 HandleHealthTick 完成（无数据竞争）。
+func StartHealthCheck[R any](s *Service[R]) {
+	if s.Base.HealthTicker != nil {
 		return
 	}
-	s.Logger.Info("房间10s后将被删除", "room_id", s.Base.ID)
-	s.Base.DeleteTimer = time.AfterFunc(10*time.Second, func() {
-		for _, p := range s.Base.Connections {
-			if !p.AI && p.Online {
-				s.Logger.Info("房间有玩家重连，取消删除", "room_id", s.Base.ID)
-				s.Base.DeleteTimer = nil
-				return
-			}
+	s.Base.HealthTicker = time.NewTicker(healthCheckInterval)
+	s.Logger.Info("房间健康检查启动", "room_id", s.Base.ID)
+}
+
+// StopHealthCheck 停止健康检查 ticker（房间退出时调用）。
+func StopHealthCheck[R any](s *Service[R]) {
+	if s.Base.HealthTicker != nil {
+		s.Base.HealthTicker.Stop()
+		s.Base.HealthTicker = nil
+	}
+}
+
+// HandleHealthTick 在房间主 goroutine 中被周期调用：
+//   - 游戏已结束：停止健康检查（结束后不再自动删房，交由每日重置/显式删除处理）。
+//   - 统计在线真人：有真人则计数清零；无真人则计数 +1。
+//   - 连续无真人达到 maxNoHumanChecks：删除房间。
+func HandleHealthTick[R any](s *Service[R]) {
+	if s.StatusOf(s.Game) == StatusEnd {
+		StopHealthCheck(s)
+		return
+	}
+
+	humanOnline := false
+	for _, p := range s.Base.Connections {
+		if !p.AI && p.Online {
+			humanOnline = true
+			break
 		}
-		StopThinkTimer(s)
+	}
+
+	if humanOnline {
+		s.Base.NoHumanChecks = 0
+		return
+	}
+
+	s.Base.NoHumanChecks++
+	s.Logger.Info("房间健康检查：无真人在线",
+		"room_id", s.Base.ID, "count", s.Base.NoHumanChecks, "max", maxNoHumanChecks)
+	if s.Base.NoHumanChecks < maxNoHumanChecks {
+		return
+	}
+
+	// 连续无真人达到阈值：删除房间。
+	StopHealthCheck(s)
+	StopThinkTimer(s)
+	select {
+	case <-s.Base.QuitCh:
+		// 已被其他路径关闭（每日重置 / 显式删除），避免重复 close panic。
+	default:
 		close(s.Base.QuitCh)
-		s.OnRoomDeleted(s.Game)
-		s.Logger.Info("房间已被延迟删除", "room_id", s.Base.ID)
-	})
-}
-
-// StartCreateGrace 房间创建后启动一个兜底删除定时器：
-// 60 秒后若房间内仍无任何在线真人（说明创建者从未连 ws 或已离开），则删除房间。
-// 用于兜底「创建房间后从未建立 WebSocket 连接」导致房间残留的场景。
-func StartCreateGrace[R any](s *Service[R]) {
-	if s.Base.DeleteTimer != nil {
-		return
 	}
-	s.Logger.Info("房间创建宽限期开始，60s 内无人连接将被删除", "room_id", s.Base.ID)
-	s.Base.DeleteTimer = time.AfterFunc(60*time.Second, func() {
-		for _, p := range s.Base.Connections {
-			if !p.AI && p.Online {
-				s.Base.DeleteTimer = nil
-				return
-			}
-		}
-		StopThinkTimer(s)
-		select {
-		case <-s.Base.QuitCh:
-			// 已被其他路径关闭（如 splendor /room/delete），避免重复 close panic。
-		default:
-			close(s.Base.QuitCh)
-		}
-		s.OnRoomDeleted(s.Game)
-		s.Logger.Info("房间创建后无人连接，已被删除", "room_id", s.Base.ID)
-	})
+	s.OnRoomDeleted(s.Game)
+	s.Logger.Info("房间连续无真人，已删除", "room_id", s.Base.ID)
 }
 
-// transferOwnerOrDelete 把房主转给一个在线真人；若没有则启动延迟删除。
-// 返回是否触发了房间删除。
-func transferOwnerOrDelete[R any](s *Service[R]) bool {
+// transferOwner 房主离线时，把房主转给一个在线真人；没有则不处理（删除交给健康检查）。
+func transferOwner[R any](s *Service[R]) {
 	for _, p := range s.Base.Connections {
 		if !p.AI && p.Online {
 			s.SetOwner(s.Game, p.PlayerID)
 			s.Logger.Info("房主已变更", "room_id", s.Base.ID, "player_id", p.PlayerID)
-			return false
+			return
 		}
 	}
-
-	if s.StatusOf(s.Game) == StatusMatch {
-		startDelayedDelete(s)
-		return true
-	}
-	return false
 }
 
 // MarkPlayerOffline 处理玩家离线。
 // match 阶段直接踢出；对局阶段仅维护连接状态（不再触发 AI 接管，超时由思考超时机制处理）。
-func MarkPlayerOffline[R any](s *Service[R], playerID string) (roomDeleted bool) {
+func MarkPlayerOffline[R any](s *Service[R], playerID string) {
 	if s.StatusOf(s.Game) == StatusMatch {
 		for i, pID := range s.Base.PlayerSeq {
 			if pID == playerID {
@@ -102,10 +113,8 @@ func MarkPlayerOffline[R any](s *Service[R], playerID string) (roomDeleted bool)
 	}
 
 	if playerID == s.GetOwner(s.Game) {
-		return transferOwnerOrDelete(s)
+		transferOwner(s)
 	}
-
-	return false
 }
 
 // HandleDisconnect 玩家断开连接命令。

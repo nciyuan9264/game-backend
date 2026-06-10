@@ -43,8 +43,11 @@ type Base struct {
 	CmdCh  chan Command  `json:"-"`
 	QuitCh chan struct{} `json:"-"`
 
-	DeleteTimer *time.Timer `json:"-"`
-	AIRunning   bool        `json:"-"`
+	// HealthTicker 周期健康检查定时器（房间级，单实例）。
+	HealthTicker *time.Ticker `json:"-"`
+	// NoHumanChecks 连续"无真人在线"的检查次数，达到阈值后删除房间。
+	NoHumanChecks int  `json:"-"`
+	AIRunning     bool `json:"-"`
 
 	// ThinkTimer 当前回合的思考超时定时器（房间级，单实例）。
 	ThinkTimer *time.Timer `json:"-"`
@@ -67,6 +70,18 @@ func NewBase(roomID string, cmdBuf int) *Base {
 
 // StatusMatch 是 lifecycle 内部用于和 game 自身 RoomStatus 字符串比较的常量。
 const StatusMatch = "match"
+
+// HealthTickChan 返回健康检查 ticker 的通道；ticker 为 nil 时返回 nil 通道
+// （nil 通道在 select 中永久阻塞，安全），避免健康检查停止后主循环 select 解引用 nil panic。
+func (b *Base) HealthTickChan() <-chan time.Time {
+	if b.HealthTicker == nil {
+		return nil
+	}
+	return b.HealthTicker.C
+}
+
+// StatusEnd 是各 game RoomStatus 表示"已结束"的统一字符串值。
+const StatusEnd = "end"
 
 // CommandTypeTurnTimeout 是 roomcore 在思考超时时投递到 CmdCh 的命令类型。
 // 各 game 在 BuildTimeoutCommand 中产出真正要执行的具体命令；此常量目前只是语义占位。

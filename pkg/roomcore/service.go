@@ -31,7 +31,7 @@ type Service[R any] struct {
 	NewVirtualConn func(R) WriteOnlyConn
 	// OnAttachReader 在玩家加入 / 重连时被调用，用于让 game 启动心跳等。
 	OnAttachReader func(R, ReadWriteConn)
-	// OnRoomDeleted 房间被 startDelayedDelete 真正删除时回调。
+	// OnRoomDeleted 房间被健康检查（HandleHealthTick）真正删除时回调。
 	OnRoomDeleted func(R)
 	// GenAIPlayerID HandleAddAI 中产生新的 AI 玩家 ID。
 	GenAIPlayerID func(R) string
