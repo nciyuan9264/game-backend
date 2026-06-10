@@ -66,7 +66,7 @@ func NewRoomService(roomID, ownerID string) *RoomService {
 		OnRoomDeleted: func(rs *RoomService) { Rooms.Delete(rs.Room.ID) },
 		GenAIPlayerID: func(rs *RoomService) string { return genAIPlayerID(rs.Room) },
 
-		GetCurrentPlayer: func(rs *RoomService) string { return rs.Room.State.CurrentPlayer },
+		GetCurrentPlayer: func(rs *RoomService) string { return CurrentTimeoutPlayer(rs.Room) },
 		GetTurnTimeout: func(rs *RoomService) (time.Duration, bool) {
 			d, ok := turnTimeoutByStatus[rs.Room.State.RoomStatus]
 			return d, ok

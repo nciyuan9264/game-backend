@@ -36,6 +36,10 @@ func (r *RoomService) Run() {
 		case cmd := <-r.Room.CmdCh:
 			r.handleCommand(cmd)
 
+			// 兜底：并购结算阶段，自动替"已离线的真人持股玩家"完成结算，
+			// 避免玩家在并购触发前就已离线导致结算队列永久卡死。
+			AutoSettleDisconnectedHolder(r.Room)
+
 			// 开局：MatchBegin 处理后 RoomStatus 切到 Waiting，启动 recorder。
 			// 但 startRecording 需要 GameStartTime 已经被赋值，所以放在 game_ready 全员到齐之后更稳妥。
 			// 使用 RoomStatusSetTile（handleAllReady 后切到 SetTile）作为开局信号；幂等保护见 startRecording。
@@ -76,7 +80,6 @@ func (r *RoomService) handleCommand(cmd domain.Command) {
 		roomcore.HandleConnect(r.svc, cmd)
 	case "disconnect":
 		roomcore.HandleDisconnect(r.svc, cmd)
-		AutoSettleDisconnectedHolder(r.Room, cmd.PlayerID)
 	case "match_ready":
 		roomcore.HandleMatchReady(r.svc, cmd)
 	case "match_begin":
