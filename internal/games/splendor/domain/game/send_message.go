@@ -13,12 +13,13 @@ import (
 	"github.com/nciyuan9264/game-backend/internal/games/splendor/domain/domain"
 	"github.com/nciyuan9264/game-backend/internal/games/splendor/dto"
 	"github.com/nciyuan9264/game-backend/internal/games/splendor/entities"
+	"github.com/nciyuan9264/game-backend/pkg/timeutil"
 )
 
 func getGameLogFilePath(r *domain.Room) string {
-	startTimeStr := r.State.GameStartTime.Format("20060102_150405")
+	startTimeStr := r.State.GameStartTime.In(timeutil.Beijing).Format("20060102_150405")
 	if r.State.GameStartTime.IsZero() {
-		startTimeStr = time.Now().Format("20060102_150405")
+		startTimeStr = timeutil.Now().Format("20060102_150405")
 	}
 	fileName := fmt.Sprintf("%s_%s.json", r.ID, startTimeStr)
 	return path.Join("./game_logs", fileName)
@@ -32,7 +33,7 @@ func WriteGameLog(r *domain.Room, playerID string, roomInfo *entities.RoomInfo, 
 			return
 		}
 		entry := map[string]interface{}{
-			"timestamp":  time.Now().Format("2006-01-02 15:04:05"),
+			"timestamp":  timeutil.Now().Format("2006-01-02 15:04:05"),
 			"result":     msg["result"],
 			"roomInfo":   roomInfo,
 			"playerID":   playerID,

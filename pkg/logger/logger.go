@@ -3,7 +3,8 @@ package logger
 import (
 	"encoding/json"
 	"log"
-	"time"
+
+	"github.com/nciyuan9264/game-backend/pkg/timeutil"
 )
 
 // Field 日志字段类型
@@ -36,7 +37,7 @@ var (
 
 // log 核心日志记录方法
 func (l *Logger) log(level, msg string, fields ...Field) {
-	ts := time.Now().Format("2006-01-02 15:04:05.000")
+	ts := timeutil.Now().Format("2006-01-02 15:04:05.000")
 
 	m := map[string]any{
 		"time":   ts,

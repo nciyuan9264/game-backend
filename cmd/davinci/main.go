@@ -13,7 +13,7 @@ func main() {
 	roompkg.InitHistoryRepo()
 
 	r := httpserver.New()
-	go service.ScheduleWeeklyRoomReset()
+	go service.ScheduleDailyRoomReset()
 
 	router.InitRouter(r)
 

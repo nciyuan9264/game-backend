@@ -8,7 +8,7 @@ import (
 
 func main() {
 	r := httpserver.New()
-	go roompkg.ScheduleWeeklyRoomReset()
+	go roompkg.ScheduleDailyRoomReset()
 	router.InitRouter(r)
 	r.Run(":8000")
 }

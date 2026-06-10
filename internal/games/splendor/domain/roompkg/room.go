@@ -25,6 +25,8 @@ var Rooms = roomcore.NewRegistry[*RoomService]()
 
 // Run 是房间主循环：单 goroutine 串行处理命令，处理完成后广播。
 func (r *RoomService) Run() {
+	// 创建宽限期：60s 内无人连接 ws 则自动删除房间，兜底「创建后从未连接」的孤儿房。
+	roomcore.StartCreateGrace(r.svc)
 	for {
 		select {
 		case cmd := <-r.Room.CmdCh:

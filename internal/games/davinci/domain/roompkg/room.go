@@ -26,6 +26,8 @@ const MaxPlayers = domain.DefaultMaxPlayers
 var Rooms = roomcore.NewRegistry[*RoomService]()
 
 func (r *RoomService) Run() {
+	// 创建宽限期：60s 内无人连接 ws 则自动删除房间，兜底「创建后从未连接」的孤儿房。
+	roomcore.StartCreateGrace(r.svc)
 	for {
 		select {
 		case cmd := <-r.Room.CmdCh:

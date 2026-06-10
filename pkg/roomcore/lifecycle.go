@@ -28,6 +28,33 @@ func startDelayedDelete[R any](s *Service[R]) {
 	})
 }
 
+// StartCreateGrace 房间创建后启动一个兜底删除定时器：
+// 60 秒后若房间内仍无任何在线真人（说明创建者从未连 ws 或已离开），则删除房间。
+// 用于兜底「创建房间后从未建立 WebSocket 连接」导致房间残留的场景。
+func StartCreateGrace[R any](s *Service[R]) {
+	if s.Base.DeleteTimer != nil {
+		return
+	}
+	s.Logger.Info("房间创建宽限期开始，60s 内无人连接将被删除", "room_id", s.Base.ID)
+	s.Base.DeleteTimer = time.AfterFunc(60*time.Second, func() {
+		for _, p := range s.Base.Connections {
+			if !p.AI && p.Online {
+				s.Base.DeleteTimer = nil
+				return
+			}
+		}
+		StopThinkTimer(s)
+		select {
+		case <-s.Base.QuitCh:
+			// 已被其他路径关闭（如 splendor /room/delete），避免重复 close panic。
+		default:
+			close(s.Base.QuitCh)
+		}
+		s.OnRoomDeleted(s.Game)
+		s.Logger.Info("房间创建后无人连接，已被删除", "room_id", s.Base.ID)
+	})
+}
+
 // transferOwnerOrDelete 把房主转给一个在线真人；若没有则启动延迟删除。
 // 返回是否触发了房间删除。
 func transferOwnerOrDelete[R any](s *Service[R]) bool {

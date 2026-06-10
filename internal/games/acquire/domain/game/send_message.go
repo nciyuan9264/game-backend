@@ -10,6 +10,7 @@ import (
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/domain"
 	"github.com/nciyuan9264/game-backend/pkg/logger"
 	"github.com/nciyuan9264/game-backend/pkg/roomctl/dto"
+	"github.com/nciyuan9264/game-backend/pkg/timeutil"
 
 	"github.com/gorilla/websocket"
 )
@@ -28,9 +29,9 @@ func CalculateTotalValue(playerStocks map[string]int, companyInfoMap map[string]
 }
 
 func getGameLogFilePath(r *domain.Room) string {
-	startTimeStr := time.Now().Format("20060102_150405")
+	startTimeStr := timeutil.Now().Format("20060102_150405")
 	if r != nil && r.State != nil && !r.State.GameStartTime.IsZero() {
-		startTimeStr = r.State.GameStartTime.Format("20060102_150405")
+		startTimeStr = r.State.GameStartTime.In(timeutil.Beijing).Format("20060102_150405")
 	}
 	fileName := fmt.Sprintf("%s_%s.json", r.ID, startTimeStr)
 	return path.Join("./game_logs", fileName)

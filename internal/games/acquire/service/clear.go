@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/roompkg"
+	"github.com/nciyuan9264/game-backend/pkg/timeutil"
 )
 
 func ScheduleDailyRoomReset() {
@@ -19,25 +20,21 @@ func ScheduleDailyRoomReset() {
 	}
 }
 
-// 计算距离下一个“今天/明天 4:00”的时间
+// 计算距离下一个“北京时间今天/明天 4:00”的时间
 func durationUntilNext4AM() time.Duration {
-	now := time.Now()
+	now := time.Now().In(timeutil.Beijing)
 
-	// 今天 4:00
+	// 北京时间今天 4:00
 	today4 := time.Date(
 		now.Year(),
 		now.Month(),
 		now.Day(),
 		4, 0, 0, 0,
-		now.Location(),
+		timeutil.Beijing,
 	)
 
-	var next time.Time
-
-	if now.Before(today4) {
-		// 还没到今天4点
-		next = today4
-	} else {
+	next := today4
+	if !now.Before(today4) {
 		// 已经过了今天4点 → 明天4点
 		next = today4.Add(24 * time.Hour)
 	}
