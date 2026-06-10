@@ -71,6 +71,7 @@ func (r *RoomService) handleCommand(cmd domain.Command) {
 		roomcore.HandleConnect(r.svc, cmd)
 	case "disconnect":
 		roomcore.HandleDisconnect(r.svc, cmd)
+		AutoSettleDisconnectedHolder(r.Room, cmd.PlayerID)
 	case "match_ready":
 		roomcore.HandleMatchReady(r.svc, cmd)
 	case "match_begin":

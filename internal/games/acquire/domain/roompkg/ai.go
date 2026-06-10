@@ -9,6 +9,7 @@ import (
 
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/data"
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/domain"
+	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/game"
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/utils"
 	"github.com/nciyuan9264/game-backend/pkg/arrayutil"
 	"github.com/nciyuan9264/game-backend/pkg/logger"
@@ -445,6 +446,44 @@ func chooseMergingSettleForAI(r *domain.Room, playerID string) []domain.MergingS
 	}
 
 	return result
+}
+
+// AutoSettleDisconnectedHolder 在玩家断线且处于并购结算阶段时，
+// 自动替该离线持股玩家提交一次结算，避免结算队列因其离线而永久卡死。
+func AutoSettleDisconnectedHolder(r *domain.Room, playerID string) {
+	if r == nil || r.State == nil || r.State.RoomStatus != domain.RoomStatusMergingSettle {
+		return
+	}
+
+	inHolder := false
+	for _, d := range r.State.MergeSettleData {
+		for _, h := range d.Hoders {
+			if h == playerID {
+				inHolder = true
+				break
+			}
+		}
+		if inHolder {
+			break
+		}
+	}
+	if !inHolder {
+		return
+	}
+
+	actions := chooseMergingSettleForAI(r, playerID)
+	payload, err := json.Marshal(map[string]interface{}{"actions": actions})
+	if err != nil {
+		logger.Error("自动结算编码失败", logger.F("room_id", r.ID), logger.F("player_id", playerID), logger.F("error", err))
+		return
+	}
+
+	logger.Info("玩家离线，自动替其完成并购结算", logger.F("room_id", r.ID), logger.F("player_id", playerID))
+	game.HandleMergingSettleMessage(r, domain.Command{
+		Type:     "game_merging_settle",
+		PlayerID: playerID,
+		Payload:  payload,
+	})
 }
 
 func chooseMergingSelectionForAI(r *domain.Room, playerID string, mainCompany []string) string {
