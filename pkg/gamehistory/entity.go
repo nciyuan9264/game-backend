@@ -56,10 +56,12 @@ type GameEvent struct {
 	PlayerID   string         `gorm:"size:64" json:"playerID"`
 	CmdType    string         `gorm:"size:64;index" json:"cmdType"`
 	Payload    datatypes.JSON `json:"payload"`
-	// StateSnapshot 该命令处理完毕（含 AutoSettle / RecomputeDerivedState 之后）的权威状态，
-	// 形如 {"state": <GameState>, "result": <map>}。回放时优先读此快照，避免重跑规则 handler 导致分叉。
-	// 老对局该列为 NULL，回放回退到"重跑 handler"逻辑。
+	// StateSnapshot 旧版权威状态列（未压缩 jsonb，形如 {"state":..,"result":..}）。
+	// 仅历史对局仍使用；新对局改写 StateBlob。回放时若 StateBlob 为空则回退读此列。
 	StateSnapshot datatypes.JSON `gorm:"type:jsonb" json:"stateSnapshot,omitempty"`
+	// StateBlob 新版权威状态列：gzip 压缩的 JSON（BoardTiles 已瘦身，仅存非空地格子）。
+	// 体积约为 StateSnapshot 的 1/10 量级，显著降低大字段读取耗时。
+	StateBlob []byte `gorm:"type:bytea" json:"-"`
 }
 
 func (GameEvent) TableName() string { return "game_events" }

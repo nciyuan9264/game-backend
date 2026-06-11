@@ -86,7 +86,7 @@ func ReplayTo(g *gamehistory.Game, players []gamehistory.GamePlayer, events []ga
 			initResult, _ := acgame.RecomputeDerivedState(r)
 			return buildSnapshotFromState(state, initResult, base, events, targetSeq, 0), nil
 		}
-		if st, res, ok := decodeSnapshot(events[limit-1].StateSnapshot); ok {
+		if st, res, ok := decodeSnapshot(events[limit-1]); ok {
 			return buildSnapshotFromState(st, res, base, events, events[limit-1].Seq, limit), nil
 		}
 		// decode 失败兜底：落到下方重算路径。
@@ -180,7 +180,7 @@ func ReplayAll(g *gamehistory.Game, players []gamehistory.GamePlayer, events []g
 		initResult, _ := acgame.RecomputeDerivedState(r)
 		snaps = append(snaps, buildSnapshotFromState(state, initResult, base, events, -1, 0))
 		for i := 0; i < len(events); i++ {
-			st, res, ok := decodeSnapshot(events[i].StateSnapshot)
+			st, res, ok := decodeSnapshot(events[i])
 			if !ok {
 				// 理论上不会发生（allHaveSnapshot 已校验非空），稳一手：回退重算路径。
 				return replayAllByReapply(r, state, base, events)
@@ -252,42 +252,27 @@ func replayAllByReapply(r *domain.Room, state *domain.GameState, base *roomcore.
 	return snaps, nil
 }
 
-// storedSnapshot 是 game_events.state_snapshot 列的反序列化结构。
-type storedSnapshot struct {
-	State  *domain.GameState      `json:"state"`
-	Result map[string]interface{} `json:"result"`
-}
-
-// allHaveSnapshot 判定该局是否为"带权威快照"的新对局：当且仅当所有事件都带非空 state_snapshot。
-// 老对局（任一事件无快照）回退到"重跑 handler"逻辑。events 为空视为可走快照路径（仅初始帧）。
+// allHaveSnapshot 判定该局是否为"带权威快照"的对局：当且仅当所有事件都带非空快照
+// （新对局的 StateBlob 或老对局的 StateSnapshot）。任一缺失则回退"重跑 handler"逻辑。
 func allHaveSnapshot(events []gamehistory.GameEvent) bool {
 	for i := range events {
-		if len(events[i].StateSnapshot) == 0 {
+		if len(events[i].StateBlob) == 0 && len(events[i].StateSnapshot) == 0 {
 			return false
 		}
 	}
 	return true
 }
 
-// decodeSnapshot 反序列化单条事件的权威快照。
-func decodeSnapshot(raw []byte) (*domain.GameState, map[string]interface{}, bool) {
-	if len(raw) == 0 {
-		return nil, nil, false
+// decodeSnapshot 反序列化单条事件的权威快照：优先用新版压缩列 StateBlob，
+// 回退到旧版未压缩列 StateSnapshot。两者都通过 acgame.DecodeStateSnapshot 统一解码 + 补齐棋盘。
+func decodeSnapshot(e gamehistory.GameEvent) (*domain.GameState, map[string]interface{}, bool) {
+	if len(e.StateBlob) > 0 {
+		return acgame.DecodeStateSnapshot(e.StateBlob)
 	}
-	var s storedSnapshot
-	if err := json.Unmarshal(raw, &s); err != nil || s.State == nil {
-		return nil, nil, false
+	if len(e.StateSnapshot) > 0 {
+		return acgame.DecodeStateSnapshot(e.StateSnapshot)
 	}
-	if s.State.BoardTiles == nil {
-		s.State.BoardTiles = map[string]*domain.Tile{}
-	}
-	if s.State.Players == nil {
-		s.State.Players = map[string]*domain.PlayerState{}
-	}
-	if s.State.Companies == nil {
-		s.State.Companies = map[string]*domain.CompanyState{}
-	}
-	return s.State, s.Result, true
+	return nil, nil, false
 }
 
 // buildSnapshotFromState 直接用权威 state + result 组装一帧快照，

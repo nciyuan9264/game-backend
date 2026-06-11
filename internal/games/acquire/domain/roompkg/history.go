@@ -104,16 +104,13 @@ func (r *RoomService) recordEvent(cmd domain.Command) {
 	}
 	// RecomputeDerivedState 为纯计算、幂等，可安全重复调用；取与 ROOM_SYNC 一致的 result。
 	result, _ := acgame.RecomputeDerivedState(r.Room)
-	snap := map[string]interface{}{
-		"state":  r.Room.State,
-		"result": result,
-	}
-	snapJSON, err := json.Marshal(snap)
+	// 编码为压缩 + 瘦身后的状态字节（BoardTiles 仅存非空地格子，回放时补齐）。
+	blob, err := acgame.EncodeStateSnapshot(r.Room.State, result)
 	if err != nil {
-		logger.Error("序列化 state_snapshot 失败", logger.F("room_id", r.Room.ID), logger.F("error", err))
-		snapJSON = nil // 退化为无快照，回放回退重算
+		logger.Error("编码 state_blob 失败", logger.F("room_id", r.Room.ID), logger.F("error", err))
+		blob = nil // 退化为无快照，回放回退重算
 	}
-	r.Recorder.OnEventWithState(r.HistorySeq, cmd.Type, cmd.PlayerID, []byte(cmd.Payload), snapJSON)
+	r.Recorder.OnEventWithState(r.HistorySeq, cmd.Type, cmd.PlayerID, []byte(cmd.Payload), blob)
 	r.HistorySeq++
 }
 

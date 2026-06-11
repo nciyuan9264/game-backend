@@ -21,7 +21,14 @@ func InitPostgres() {
 		return
 	}
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+	// PreferSimpleProtocol=true 关闭 pgx 的隐式 prepared statement 缓存。
+	// Neon 等使用连接池（pgbouncer 风格）的环境下，复用连接上缓存的执行计划会在表结构变化
+	// （如 AutoMigrate 新增列）后报 "cached plan must not change result type (SQLSTATE 0A000)"。
+	// 使用 simple protocol 可彻底规避该问题。
+	db, err := gorm.Open(postgres.New(postgres.Config{
+		DSN:                  dsn,
+		PreferSimpleProtocol: true,
+	}), &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
 	})
 	if err != nil {

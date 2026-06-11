@@ -63,8 +63,8 @@ func (r *Recorder) OnEvent(seq int, cmdType, playerID string, payload []byte) {
 }
 
 // OnEventWithState 在 OnEvent 基础上额外保存该命令处理完毕后的权威状态快照。
-// stateSnapshot 为 nil 时退化为不带快照（与 OnEvent 等价）。
-func (r *Recorder) OnEventWithState(seq int, cmdType, playerID string, payload, stateSnapshot []byte) {
+// stateBlob 为已编码（gzip 压缩 + 瘦身）的状态字节，写入 StateBlob 列；为 nil 时退化为不带快照。
+func (r *Recorder) OnEventWithState(seq int, cmdType, playerID string, payload, stateBlob []byte) {
 	if r == nil {
 		return
 	}
@@ -79,8 +79,8 @@ func (r *Recorder) OnEventWithState(seq int, cmdType, playerID string, payload, 
 		CmdType:    cmdType,
 		Payload:    datatypes.JSON(pl),
 	}
-	if len(stateSnapshot) > 0 {
-		e.StateSnapshot = datatypes.JSON(stateSnapshot)
+	if len(stateBlob) > 0 {
+		e.StateBlob = stateBlob
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
