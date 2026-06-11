@@ -28,7 +28,7 @@ func HistoryGameSnapshot(c *gin.Context) {
 		return
 	}
 
-	g, players, events, err := roompkg.HistoryRepo.Detail(c.Request.Context(), id, "acquire")
+	g, players, events, err := roompkg.HistoryRepo.DetailForReplay(c.Request.Context(), id, "acquire")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -66,7 +66,7 @@ func HistoryGameSnapshots(c *gin.Context) {
 		return
 	}
 
-	g, players, events, err := roompkg.HistoryRepo.Detail(c.Request.Context(), id, "acquire")
+	g, players, events, err := roompkg.HistoryRepo.DetailForReplay(c.Request.Context(), id, "acquire")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

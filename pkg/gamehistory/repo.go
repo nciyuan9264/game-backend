@@ -94,7 +94,36 @@ func (r *Repo) ListByUser(ctx context.Context, userID int64, gameType string, li
 }
 
 // Detail returns one game with players and events. gameType scopes access.
+// eventColumnsNoSnapshot 列出 game_events 除 state_snapshot 外的所有列。
+// state_snapshot 体积巨大（每行一份完整 GameState），仅回放需要；
+// 其余接口（如对局详情）查询时必须排除它，否则 SELECT * 会拖出 MB 级数据导致慢查询。
+var eventColumnsNoSnapshot = []string{"id", "game_id", "seq", "occurred_at", "player_id", "cmd_type", "payload"}
+
 func (r *Repo) Detail(ctx context.Context, gameID int64, gameType string) (*Game, []GamePlayer, []GameEvent, error) {
+	var g Game
+	if err := r.db.WithContext(ctx).Where("id = ? AND game_type = ?", gameID, gameType).First(&g).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, nil, nil
+		}
+		return nil, nil, nil, err
+	}
+	var players []GamePlayer
+	if err := r.db.WithContext(ctx).Where("game_id = ?", gameID).Order("seat_index ASC").Find(&players).Error; err != nil {
+		return nil, nil, nil, err
+	}
+	var events []GameEvent
+	// 不查 state_snapshot：对局详情只需事件元信息，避免拉出海量快照数据。
+	if err := r.db.WithContext(ctx).
+		Select(eventColumnsNoSnapshot).
+		Where("game_id = ?", gameID).Order("seq ASC").Find(&events).Error; err != nil {
+		return nil, nil, nil, err
+	}
+	return &g, players, events, nil
+}
+
+// DetailForReplay 与 Detail 类似，但事件包含 state_snapshot 列（供回放引擎使用）。
+// 仅 acquire 的快照/回放接口调用，其它接口请用 Detail 以避免慢查询。
+func (r *Repo) DetailForReplay(ctx context.Context, gameID int64, gameType string) (*Game, []GamePlayer, []GameEvent, error) {
 	var g Game
 	if err := r.db.WithContext(ctx).Where("id = ? AND game_type = ?", gameID, gameType).First(&g).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
