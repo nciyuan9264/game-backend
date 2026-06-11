@@ -31,15 +31,9 @@ func StopHealthCheck[R any](s *Service[R]) {
 }
 
 // HandleHealthTick 在房间主 goroutine 中被周期调用：
-//   - 游戏已结束：停止健康检查（结束后不再自动删房，交由每日重置/显式删除处理）。
 //   - 统计在线真人：有真人则计数清零；无真人则计数 +1。
-//   - 连续无真人达到 maxNoHumanChecks：删除房间。
+//   - 连续无真人达到 maxNoHumanChecks：删除房间（含游戏结束状态）。
 func HandleHealthTick[R any](s *Service[R]) {
-	if s.StatusOf(s.Game) == StatusEnd {
-		StopHealthCheck(s)
-		return
-	}
-
 	humanOnline := false
 	for _, p := range s.Base.Connections {
 		if !p.AI && p.Online {

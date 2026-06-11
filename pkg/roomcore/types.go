@@ -80,9 +80,6 @@ func (b *Base) HealthTickChan() <-chan time.Time {
 	return b.HealthTicker.C
 }
 
-// StatusEnd 是各 game RoomStatus 表示"已结束"的统一字符串值。
-const StatusEnd = "end"
-
 // CommandTypeTurnTimeout 是 roomcore 在思考超时时投递到 CmdCh 的命令类型。
 // 各 game 在 BuildTimeoutCommand 中产出真正要执行的具体命令；此常量目前只是语义占位。
 const CommandTypeTurnTimeout = "turn_timeout"
