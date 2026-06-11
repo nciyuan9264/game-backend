@@ -11,6 +11,7 @@ import (
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/domain"
 	acgame "github.com/nciyuan9264/game-backend/internal/games/acquire/domain/game"
 	"github.com/nciyuan9264/game-backend/pkg/gamehistory"
+	"github.com/nciyuan9264/game-backend/pkg/logger"
 	"github.com/nciyuan9264/game-backend/pkg/roomcore"
 )
 
@@ -70,6 +71,26 @@ func ReplayTo(g *gamehistory.Game, players []gamehistory.GamePlayer, events []ga
 		base.PlayerSeq = append(base.PlayerSeq, p.PlayerID)
 	}
 	r := &domain.Room{Base: base, State: state}
+
+	// 快照优先路径：新对局直接读权威 state_snapshot 组装目标帧，不重跑 handler。
+	if allHaveSnapshot(events) {
+		limit := targetSeq + 1
+		if limit > len(events) {
+			limit = len(events)
+		}
+		if limit < 0 {
+			limit = 0
+		}
+		if limit == 0 {
+			// 初始态：用 initial_state 重算 result。
+			initResult, _ := acgame.RecomputeDerivedState(r)
+			return buildSnapshotFromState(state, initResult, base, events, targetSeq, 0), nil
+		}
+		if st, res, ok := decodeSnapshot(events[limit-1].StateSnapshot); ok {
+			return buildSnapshotFromState(st, res, base, events, events[limit-1].Seq, limit), nil
+		}
+		// decode 失败兜底：落到下方重算路径。
+	}
 
 	// 3. 预扫描所有 events，按 playerID 收集未来要打出的 tile 序列；
 	// 每次 placeTile 后据此把该玩家手牌覆盖为"接下来 5 步会打出的 tile"。
@@ -151,6 +172,31 @@ func ReplayAll(g *gamehistory.Game, players []gamehistory.GamePlayer, events []g
 	}
 	r := &domain.Room{Base: base, State: state}
 
+	// 快照优先路径：若所有事件都带权威 state_snapshot（新对局），直接用快照逐帧组装，
+	// 不重跑 handler，从根本上消除状态分叉。
+	if allHaveSnapshot(events) {
+		snaps := make([]*Snapshot, 0, len(events)+1)
+		// 初始态（应用 0 个事件，seq=-1）：用 initial_state 重算 result。
+		initResult, _ := acgame.RecomputeDerivedState(r)
+		snaps = append(snaps, buildSnapshotFromState(state, initResult, base, events, -1, 0))
+		for i := 0; i < len(events); i++ {
+			st, res, ok := decodeSnapshot(events[i].StateSnapshot)
+			if !ok {
+				// 理论上不会发生（allHaveSnapshot 已校验非空），稳一手：回退重算路径。
+				return replayAllByReapply(r, state, base, events)
+			}
+			snaps = append(snaps, buildSnapshotFromState(st, res, base, events, events[i].Seq, i+1))
+		}
+		return snaps, nil
+	}
+
+	// 回退路径：老对局无快照，重跑 handler 重建状态。
+	return replayAllByReapply(r, state, base, events)
+}
+
+// replayAllByReapply 老对局回退路径：逐条重跑规则 handler 重建状态并产出每帧快照。
+// 注意：该路径含非确定性（map 迭代/不稳定排序），可能与真实对局分叉，仅用于无快照的历史对局。
+func replayAllByReapply(r *domain.Room, state *domain.GameState, base *roomcore.Base, events []gamehistory.GameEvent) ([]*Snapshot, error) {
 	// 3. 预扫描 future placeTile 序列。
 	futureByPlayer := make(map[string][]string)
 	for _, ev := range events {
@@ -176,15 +222,117 @@ func ReplayAll(g *gamehistory.Game, players []gamehistory.GamePlayer, events []g
 	// 逐步推进，每步产出一帧。
 	for i := 0; i < len(events); i++ {
 		e := events[i]
+		// 分叉诊断：记录应用前的关键状态指纹。
+		prevStatus := r.State.RoomStatus
+		prevPlayer := r.State.CurrentPlayer
+		prevLastTile := r.State.LastTileKey
+
 		applyEvent(r, e)
 		if e.CmdType == "game_place_tile" {
 			cursors[e.PlayerID]++
 		}
 		acgame.RecomputeDerivedState(r)
+
+		// 若白名单命令应用后三项关键状态均未变，疑似被守卫拒绝 → 分叉。
+		if gamehistory.IsRecordableCmd(e.CmdType) &&
+			r.State.RoomStatus == prevStatus &&
+			r.State.CurrentPlayer == prevPlayer &&
+			r.State.LastTileKey == prevLastTile {
+			logger.Warn("replay 疑似分叉：事件未推进状态",
+				logger.F("room_id", r.ID),
+				logger.F("seq", e.Seq),
+				logger.F("cmd_type", e.CmdType),
+				logger.F("player_id", e.PlayerID),
+				logger.F("status", string(r.State.RoomStatus)))
+		}
+
 		snaps = append(snaps, buildSnapshot(r, state, base, events, futureByPlayer, cursors, e.Seq, i+1))
 	}
 
 	return snaps, nil
+}
+
+// storedSnapshot 是 game_events.state_snapshot 列的反序列化结构。
+type storedSnapshot struct {
+	State  *domain.GameState      `json:"state"`
+	Result map[string]interface{} `json:"result"`
+}
+
+// allHaveSnapshot 判定该局是否为"带权威快照"的新对局：当且仅当所有事件都带非空 state_snapshot。
+// 老对局（任一事件无快照）回退到"重跑 handler"逻辑。events 为空视为可走快照路径（仅初始帧）。
+func allHaveSnapshot(events []gamehistory.GameEvent) bool {
+	for i := range events {
+		if len(events[i].StateSnapshot) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// decodeSnapshot 反序列化单条事件的权威快照。
+func decodeSnapshot(raw []byte) (*domain.GameState, map[string]interface{}, bool) {
+	if len(raw) == 0 {
+		return nil, nil, false
+	}
+	var s storedSnapshot
+	if err := json.Unmarshal(raw, &s); err != nil || s.State == nil {
+		return nil, nil, false
+	}
+	if s.State.BoardTiles == nil {
+		s.State.BoardTiles = map[string]*domain.Tile{}
+	}
+	if s.State.Players == nil {
+		s.State.Players = map[string]*domain.PlayerState{}
+	}
+	if s.State.Companies == nil {
+		s.State.Companies = map[string]*domain.CompanyState{}
+	}
+	return s.State, s.Result, true
+}
+
+// buildSnapshotFromState 直接用权威 state + result 组装一帧快照，
+// 不重跑 handler、不做 future-tile 推断（快照里已是处理后的最终态），
+// 输出结构与 buildSnapshot 完全一致，保证前端零改动。
+func buildSnapshotFromState(state *domain.GameState, result map[string]interface{}, base *roomcore.Base, events []gamehistory.GameEvent, targetSeq, limit int) *Snapshot {
+	playersInfo := make(map[string]interface{}, len(base.Connections))
+	for _, p := range base.Connections {
+		playersInfo[p.PlayerID] = map[string]interface{}{
+			"playerID": p.PlayerID,
+			"online":   p.Online,
+			"ai":       p.AI,
+		}
+	}
+
+	playersData := make(map[string]interface{}, len(state.Players))
+	for pid, ps := range state.Players {
+		playersData[pid] = ps
+	}
+
+	snap := &Snapshot{
+		Seq:         targetSeq,
+		TotalEvents: len(events),
+		RoomData: cloneStateMap(map[string]interface{}{
+			"companyInfo":   state.Companies,
+			"currentPlayer": state.CurrentPlayer,
+			"gameStatus":    state.RoomStatus,
+			"tiles":         state.BoardTiles,
+			"players":       playersInfo,
+		}),
+		PlayersData: cloneStateMap(playersData),
+		Result:      result,
+	}
+
+	if limit > 0 && limit-1 < len(events) {
+		ce := events[limit-1]
+		snap.CurrentEvent = &EventInfo{
+			Seq:      ce.Seq,
+			PlayerID: ce.PlayerID,
+			CmdType:  ce.CmdType,
+			Payload:  json.RawMessage(ce.Payload),
+		}
+	}
+
+	return snap
 }
 
 // buildSnapshot 用当前 Room 状态组装一帧快照。

@@ -46,6 +46,12 @@ func NewRecorder(repo *Repo, game *Game, players []GamePlayer) *Recorder {
 }
 
 func (r *Recorder) OnEvent(seq int, cmdType, playerID string, payload []byte) {
+	r.OnEventWithState(seq, cmdType, playerID, payload, nil)
+}
+
+// OnEventWithState 在 OnEvent 基础上额外保存该命令处理完毕后的权威状态快照。
+// stateSnapshot 为 nil 时退化为不带快照（与 OnEvent 等价）。
+func (r *Recorder) OnEventWithState(seq int, cmdType, playerID string, payload, stateSnapshot []byte) {
 	if r == nil {
 		return
 	}
@@ -59,6 +65,9 @@ func (r *Recorder) OnEvent(seq int, cmdType, playerID string, payload []byte) {
 		PlayerID:   playerID,
 		CmdType:    cmdType,
 		Payload:    datatypes.JSON(pl),
+	}
+	if len(stateSnapshot) > 0 {
+		e.StateSnapshot = datatypes.JSON(stateSnapshot)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

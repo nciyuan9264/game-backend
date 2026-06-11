@@ -93,7 +93,8 @@ func (r *RoomService) startRecording() {
 		logger.F("room_id", r.Room.ID))
 }
 
-// recordEvent 把命令写入内存事件缓冲（白名单过滤）。
+// recordEvent 把命令写入内存事件缓冲（白名单过滤），并附带该命令处理完毕后的权威状态快照。
+// 快照（state + result）用于回放时直接渲染，避免重跑规则 handler 导致状态分叉。
 func (r *RoomService) recordEvent(cmd domain.Command) {
 	if r.Recorder == nil {
 		return
@@ -101,7 +102,18 @@ func (r *RoomService) recordEvent(cmd domain.Command) {
 	if !gamehistory.IsRecordableCmd(cmd.Type) {
 		return
 	}
-	r.Recorder.OnEvent(r.HistorySeq, cmd.Type, cmd.PlayerID, []byte(cmd.Payload))
+	// RecomputeDerivedState 为纯计算、幂等，可安全重复调用；取与 ROOM_SYNC 一致的 result。
+	result, _ := acgame.RecomputeDerivedState(r.Room)
+	snap := map[string]interface{}{
+		"state":  r.Room.State,
+		"result": result,
+	}
+	snapJSON, err := json.Marshal(snap)
+	if err != nil {
+		logger.Error("序列化 state_snapshot 失败", logger.F("room_id", r.Room.ID), logger.F("error", err))
+		snapJSON = nil // 退化为无快照，回放回退重算
+	}
+	r.Recorder.OnEventWithState(r.HistorySeq, cmd.Type, cmd.PlayerID, []byte(cmd.Payload), snapJSON)
 	r.HistorySeq++
 }
 
