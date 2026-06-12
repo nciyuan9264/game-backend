@@ -33,20 +33,22 @@ services:
       - '8001:8000'
     restart: always
 
-  # splendor:
-  #   container_name: backend-splendor
-  #   build:
-  #     context: .
-  #     dockerfile: deployments/Dockerfile
-  #     args:
-  #       GAME: splendor
-  #   environment:
-  #     - POSTGRES_DSN=${POSTGRES_DSN}
-  #   volumes:
-  #     - /var/log/splendor:/app/game_logs
-  #   networks:
-  #     - global-network
-  #   restart: always
+  splendor:
+    container_name: backend-splendor
+    build:
+      context: .
+      dockerfile: deployments/Dockerfile
+      args:
+        GAME: splendor
+    environment:
+      - POSTGRES_DSN=${POSTGRES_DSN}
+    volumes:
+      - /var/log/splendor:/app/game_logs
+    networks:
+      - global-network
+    ports:
+      - '8002:8000'
+    restart: always
 
 networks:
   global-network:

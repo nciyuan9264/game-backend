@@ -217,6 +217,8 @@ func (r *Repo) Leaderboard(ctx context.Context, gameType string, limit, offset i
 		return r.leaderboardDavinci(ctx, limit, offset)
 	case "acquire":
 		return r.leaderboardAcquire(ctx, limit, offset)
+	case "splendor":
+		return r.leaderboardByAvgRank(ctx, "splendor", limit, offset)
 	default:
 		return nil, errors.New("invalid game_type")
 	}
@@ -266,6 +268,12 @@ func (r *Repo) leaderboardDavinci(ctx context.Context, limit, offset int) ([]Lea
 }
 
 func (r *Repo) leaderboardAcquire(ctx context.Context, limit, offset int) ([]LeaderboardEntry, error) {
+	return r.leaderboardByAvgRank(ctx, "acquire", limit, offset)
+}
+
+// leaderboardByAvgRank 按"平均名次"聚合排行榜：名次越小越靠前。
+// 适用于以最终名次（final_rank）衡量强弱的游戏（acquire / splendor）。
+func (r *Repo) leaderboardByAvgRank(ctx context.Context, gameType string, limit, offset int) ([]LeaderboardEntry, error) {
 	type row struct {
 		UserID     int64
 		TotalGames int
@@ -278,7 +286,7 @@ func (r *Repo) leaderboardAcquire(ctx context.Context, limit, offset int) ([]Lea
 		Select(`gp.user_id AS user_id,
 		        COUNT(*) AS total_games,
 		        AVG(gp.final_rank)::float AS avg_rank`).
-		Where("g.game_type = ? AND g.ended_at IS NOT NULL AND gp.user_id IS NOT NULL AND gp.final_rank IS NOT NULL", "acquire").
+		Where("g.game_type = ? AND g.ended_at IS NOT NULL AND gp.user_id IS NOT NULL AND gp.final_rank IS NOT NULL", gameType).
 		Group("gp.user_id").
 		Order("avg_rank ASC, total_games DESC, gp.user_id ASC").
 		Limit(limit).
@@ -298,7 +306,7 @@ func (r *Repo) leaderboardAcquire(ctx context.Context, limit, offset int) ([]Lea
 		})
 		userIDs = append(userIDs, rr.UserID)
 	}
-	if err := r.fillLatestPlayerIDs(ctx, "acquire", userIDs, entries); err != nil {
+	if err := r.fillLatestPlayerIDs(ctx, gameType, userIDs, entries); err != nil {
 		return nil, err
 	}
 	return entries, nil

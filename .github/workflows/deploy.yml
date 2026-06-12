@@ -7,66 +7,132 @@ on:
   workflow_dispatch:
 
 jobs:
-  build_and_push:
+  # 检测本次推送改动了哪些游戏：
+  # - 改了某游戏自己的代码（internal/games/<game>、cmd/<game>）→ 只构建该游戏；
+  # - 改了共享文件（pkg/、go.mod/go.sum、Dockerfile、compose、workflow）→ 三个游戏全部重建；
+  # - 手动触发（workflow_dispatch）→ 强制全部重建。
+  changes:
     runs-on: ubuntu-22.04
-
+    outputs:
+      davinci: ${{ steps.decide.outputs.davinci }}
+      acquire: ${{ steps.decide.outputs.acquire }}
+      splendor: ${{ steps.decide.outputs.splendor }}
+      any: ${{ steps.decide.outputs.any }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # 登录腾讯云 TCR
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            shared:
+              - 'pkg/**'
+              - 'go.mod'
+              - 'go.sum'
+              - 'deployments/Dockerfile'
+              - 'docker-compose.yml'
+              - '.github/workflows/deploy.yml'
+            davinci:
+              - 'internal/games/davinci/**'
+              - 'cmd/davinci/**'
+            acquire:
+              - 'internal/games/acquire/**'
+              - 'cmd/acquire/**'
+            splendor:
+              - 'internal/games/splendor/**'
+              - 'cmd/splendor/**'
+
+      - name: Decide which games to build
+        id: decide
+        run: |
+          # 手动触发或共享文件变更 → 全部重建
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ steps.filter.outputs.shared }}" = "true" ]; then
+            echo "davinci=true"  >> "$GITHUB_OUTPUT"
+            echo "acquire=true"  >> "$GITHUB_OUTPUT"
+            echo "splendor=true" >> "$GITHUB_OUTPUT"
+            echo "any=true"      >> "$GITHUB_OUTPUT"
+            echo "决策：全部重建（手动触发或共享文件变更）"
+            exit 0
+          fi
+
+          davinci="${{ steps.filter.outputs.davinci }}"
+          acquire="${{ steps.filter.outputs.acquire }}"
+          splendor="${{ steps.filter.outputs.splendor }}"
+          echo "davinci=${davinci}"   >> "$GITHUB_OUTPUT"
+          echo "acquire=${acquire}"   >> "$GITHUB_OUTPUT"
+          echo "splendor=${splendor}" >> "$GITHUB_OUTPUT"
+
+          if [ "$davinci" = "true" ] || [ "$acquire" = "true" ] || [ "$splendor" = "true" ]; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "决策：davinci=${davinci} acquire=${acquire} splendor=${splendor}"
+
+  build_and_push:
+    runs-on: ubuntu-22.04
+    needs: changes
+    if: ${{ needs.changes.outputs.any == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        game: [davinci, acquire, splendor]
+    steps:
+      - name: Skip unchanged game
+        id: guard
+        run: |
+          build="${{ needs.changes.outputs[matrix.game] }}"
+          echo "build=${build}" >> "$GITHUB_OUTPUT"
+          if [ "$build" != "true" ]; then
+            echo "游戏 ${{ matrix.game }} 无变更，跳过构建"
+          fi
+
+      - name: Checkout code
+        if: ${{ steps.guard.outputs.build == 'true' }}
+        uses: actions/checkout@v4
+
       - name: Login to Tencent Cloud TCR
+        if: ${{ steps.guard.outputs.build == 'true' }}
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.TCR_LOGIN_SERVER }}
           username: ${{ secrets.TCR_USERNAME }}
           password: ${{ secrets.TCR_PASSWORD }}
 
-      # 自动生成 tag
       - name: Set image tag
+        if: ${{ steps.guard.outputs.build == 'true' }}
         id: vars
         run: echo "IMAGE_TAG=$(echo ${GITHUB_SHA} | head -c7)" >> $GITHUB_OUTPUT
 
-      # 构建 davinci 镜像
-      - name: Build davinci docker image
+      - name: Build ${{ matrix.game }} docker image
+        if: ${{ steps.guard.outputs.build == 'true' }}
         run: |
           export DOCKER_BUILDKIT=0
           docker build \
-            --build-arg GAME=davinci \
+            --build-arg GAME=${{ matrix.game }} \
             -f deployments/Dockerfile \
-            -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/davinci:latest \
-            -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/davinci:${{ steps.vars.outputs.IMAGE_TAG }} \
+            -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/${{ matrix.game }}:latest \
+            -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/${{ matrix.game }}:${{ steps.vars.outputs.IMAGE_TAG }} \
             .
 
-      # 构建 acquire 镜像
-      - name: Build acquire docker image
+      - name: Push ${{ matrix.game }} images
+        if: ${{ steps.guard.outputs.build == 'true' }}
         run: |
-          export DOCKER_BUILDKIT=0
-          docker build \
-            --build-arg GAME=acquire \
-            -f deployments/Dockerfile \
-            -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/acquire:latest \
-            -t ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/acquire:${{ steps.vars.outputs.IMAGE_TAG }} \
-            .
-
-      # 推送 davinci 镜像
-      - name: Push davinci images
-        run: |
-          docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/davinci:latest
-          docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/davinci:${{ steps.vars.outputs.IMAGE_TAG }}
-
-      # 推送 acquire 镜像
-      - name: Push acquire images
-        run: |
-          docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/acquire:latest
-          docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/acquire:${{ steps.vars.outputs.IMAGE_TAG }}
+          docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/${{ matrix.game }}:latest
+          docker push ${{ secrets.TCR_LOGIN_SERVER }}/tengxuntcr/${{ matrix.game }}:${{ steps.vars.outputs.IMAGE_TAG }}
 
   deploy:
     runs-on: ubuntu-latest
-    needs: build_and_push
+    needs: [changes, build_and_push]
+    if: ${{ needs.changes.outputs.any == 'true' }}
 
     steps:
-      # SSH 到服务器执行部署
+      # SSH 到服务器，只拉取/重建发生变更的游戏服务。
+      # docker compose pull/up 只对指定 service 生效，未变更的服务不受影响。
       - name: Execute remote ssh commands
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -75,10 +141,15 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /home/game-backend
+            services=""
+            [ "${{ needs.changes.outputs.davinci }}" = "true" ]  && services="$services davinci"
+            [ "${{ needs.changes.outputs.acquire }}" = "true" ]  && services="$services acquire"
+            [ "${{ needs.changes.outputs.splendor }}" = "true" ] && services="$services splendor"
+            echo "本次部署服务:${services}"
             echo "Pulling latest images..."
-            docker compose pull
+            docker compose pull $services
             echo "Recreating services..."
-            docker compose up -d
+            docker compose up -d $services
             echo "Cleanup old images..."
             docker image prune -f
 

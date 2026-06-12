@@ -19,6 +19,7 @@ type RoomInfo struct {
 	MaxPlayers     int `json:"maxPlayers,omitempty"`
 	EmptyTileCount int `json:"emptyTileCount,omitempty"`
 	BoardCardCount int `json:"boardCardCount,omitempty"`
+	MaxScore       int `json:"maxScore,omitempty"`
 }
 
 type WsMatchSyncData struct {

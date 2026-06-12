@@ -9,15 +9,15 @@ const (
 type NormalCard struct {
 	ID     int            `json:"id"`     // 卡牌ID
 	Level  int            `json:"level"`  // 1/2/3
-	Bonus  string         `json:"bonus"`  // 折扣颜色：emerald, diamond, sapphire, onyx, ruby
+	Bonus  string         `json:"bonus"`  // 折扣颜色：Red, Green, White, Blue, Black
 	Points int            `json:"points"` // 荣誉分
 	Cost   map[string]int `json:"cost"`   // 五色费用
-	State  int            `json:"state"`  // 0: 未被选中, 1: 已被选中
+	State  int            `json:"state"`  // 0:牌堆中 1:桌面明牌 2:已离开桌面/已购买
 }
 
 type NobleCard struct {
 	ID     string         `json:"id"`     // e.g., "N1"
-	Cost   map[string]int `json:"cost"`   // 奖励条件，如{"emerald":4,"sapphire":4}
+	Cost   map[string]int `json:"cost"`   // 迎接条件，如{"Red":4,"Green":4}
 	Points int            `json:"points"` // 固定 3 分
-	State  int            `json:"state"`  // 如果有状态管理：0=未分配, 1=已分配
+	State  int            `json:"state"`  // 0:未揭示 1:可迎接 2:已被迎接
 }

@@ -43,12 +43,20 @@ func InitRoomData(r *domain.Room) {
 		}
 	}
 
+	// 宝石数量随人数变化：4 人 7 个、3 人 5 个、2 人 4 个；Gold 固定 5 个。
+	gemPerColor := 7
+	switch r.State.MaxPlayers {
+	case 2:
+		gemPerColor = 4
+	case 3:
+		gemPerColor = 5
+	}
 	r.State.Gems = map[string]int{
-		"Blue":  7,
-		"Green": 7,
-		"Red":   7,
-		"White": 7,
-		"Black": 7,
+		"Blue":  gemPerColor,
+		"Green": gemPerColor,
+		"Red":   gemPerColor,
+		"White": gemPerColor,
+		"Black": gemPerColor,
 		"Gold":  5,
 	}
 

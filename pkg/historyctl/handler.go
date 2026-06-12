@@ -43,7 +43,7 @@ func currentUserID(c *gin.Context) (int64, bool) {
 func resolveGameType(c *gin.Context, defaultGameType string) (string, bool) {
 	gameType := c.DefaultQuery("game_type", defaultGameType)
 	switch gameType {
-	case "acquire", "davinci":
+	case "acquire", "davinci", "splendor":
 		return gameType, true
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid game_type"})
@@ -156,12 +156,11 @@ func MakeStatsHandler(opts Options) gin.HandlerFunc {
 
 func MakeSnapshotHandler(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		gameType, ok := resolveGameType(c, opts.DefaultGameType)
-		if !ok {
+		if _, ok := resolveGameType(c, opts.DefaultGameType); !ok {
 			return
 		}
-		if gameType != "acquire" || !opts.AllowSnapshot || opts.SnapshotHandler == nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "snapshot is only supported for acquire"})
+		if !opts.AllowSnapshot || opts.SnapshotHandler == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "snapshot is not supported for this game"})
 			return
 		}
 		opts.SnapshotHandler(c)

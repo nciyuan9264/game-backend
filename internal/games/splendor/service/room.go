@@ -35,20 +35,6 @@ func CreateRoom(userID string) (string, error) {
 	return roomID, nil
 }
 
-func DeleteRoom(params dto.DeleteRoomRequest) error {
-	rs, ok := roompkg.Rooms.Get(params.RoomID)
-	if !ok {
-		return fmt.Errorf("房间不存在")
-	}
-	select {
-	case <-rs.Room.QuitCh:
-	default:
-		close(rs.Room.QuitCh)
-	}
-	roompkg.Rooms.Delete(params.RoomID)
-	return nil
-}
-
 func GetRoomList() ([]dto.RoomInfo, error) {
 	var rooms []dto.RoomInfo
 	for roomID, rs := range roompkg.Rooms.Snapshot() {
@@ -61,12 +47,20 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 				Ready:    p.Ready,
 			})
 		}
+		// 进度：取房间内所有玩家的最高荣誉分（0~15，达到 15 触发终局）。
+		maxScore := 0
+		for _, ps := range rs.Room.State.Players {
+			if ps != nil && ps.Score > maxScore {
+				maxScore = ps.Score
+			}
+		}
 		rooms = append(rooms, dto.RoomInfo{
 			RoomID:     roomID,
 			OwnerID:    rs.Room.State.OwnerID,
 			MaxPlayers: rs.Room.State.MaxPlayers,
 			Status:     string(rs.Room.State.RoomStatus),
 			RoomPlayer: players,
+			MaxScore:   maxScore,
 		})
 	}
 	return rooms, nil

@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"path"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -13,53 +11,7 @@ import (
 	"github.com/nciyuan9264/game-backend/internal/games/splendor/domain/domain"
 	"github.com/nciyuan9264/game-backend/internal/games/splendor/dto"
 	"github.com/nciyuan9264/game-backend/internal/games/splendor/entities"
-	"github.com/nciyuan9264/game-backend/pkg/timeutil"
 )
-
-func getGameLogFilePath(r *domain.Room) string {
-	startTimeStr := r.State.GameStartTime.In(timeutil.Beijing).Format("20060102_150405")
-	if r.State.GameStartTime.IsZero() {
-		startTimeStr = timeutil.Now().Format("20060102_150405")
-	}
-	fileName := fmt.Sprintf("%s_%s.json", r.ID, startTimeStr)
-	return path.Join("./game_logs", fileName)
-}
-
-func WriteGameLog(r *domain.Room, playerID string, roomInfo *entities.RoomInfo, msg map[string]interface{}) {
-	go func() {
-		logPath := getGameLogFilePath(r)
-		if err := os.MkdirAll(path.Dir(logPath), 0755); err != nil {
-			log.Println("❌ 创建日志目录失败:", err)
-			return
-		}
-		entry := map[string]interface{}{
-			"timestamp":  timeutil.Now().Format("2006-01-02 15:04:05"),
-			"result":     msg["result"],
-			"roomInfo":   roomInfo,
-			"playerID":   playerID,
-			"playerData": msg["playerData"],
-			"roomData":   msg["roomData"],
-			"tempData":   msg["tempData"],
-		}
-		jsonEntry, err := json.Marshal(entry)
-		if err != nil {
-			log.Println("❌ 序列化日志 entry 失败:", err)
-			return
-		}
-		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			log.Println("❌ 打开游戏日志文件失败:", err)
-			return
-		}
-		defer f.Close()
-		jsonEntry = append(jsonEntry, ',')
-		if _, err := f.Write(jsonEntry); err != nil {
-			log.Println("❌ 写入日志失败:", err)
-			return
-		}
-		f.Write([]byte("\n"))
-	}()
-}
 
 func buildRoomInfo(r *domain.Room) *entities.RoomInfo {
 	return &entities.RoomInfo{
@@ -129,15 +81,12 @@ func SyncRoomMessage(conn domain.WriteOnlyConn, r *domain.Room, pc *domain.Playe
 		return fmt.Errorf("❌ 编码 JSON 失败: %w", err)
 	}
 
-	if pc.PlayerID == r.State.CurrentPlayer {
-		WriteGameLog(r, pc.PlayerID, roomInfo, msg)
-	}
-
 	return conn.WriteMessage(websocket.TextMessage, data)
 }
 
-// BroadcastToRoom 仅遍历发送（score/状态切换的副作用挪到 HandleBuyCardMessage 末尾）。
+// BroadcastToRoom 广播前先权威重算分数，保证直播与回放一致。
 func BroadcastToRoom(r *domain.Room) {
+	RecomputeDerivedState(r)
 	for _, pc := range r.Connections {
 		if !pc.Online || pc.Conn == nil {
 			continue

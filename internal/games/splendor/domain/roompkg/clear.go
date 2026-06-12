@@ -34,7 +34,16 @@ func durationUntilNext4AM() time.Duration {
 }
 
 func clearRooms() {
-	for k := range Rooms.Snapshot() {
+	for k, rs := range Rooms.Snapshot() {
+		// 先关闭 QuitCh 通知房间 goroutine 退出（停止健康检查/思考定时器/录制器），再从注册表移除，
+		// 避免每日重置后 Run() goroutine 与定时器泄漏。
+		if rs != nil && rs.Room != nil {
+			select {
+			case <-rs.Room.QuitCh:
+			default:
+				close(rs.Room.QuitCh)
+			}
+		}
 		Rooms.Delete(k)
 	}
 }

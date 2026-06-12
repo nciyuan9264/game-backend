@@ -8,6 +8,7 @@ import (
 	"github.com/nciyuan9264/game-backend/internal/games/splendor/domain/data"
 	"github.com/nciyuan9264/game-backend/internal/games/splendor/domain/domain"
 	"github.com/nciyuan9264/game-backend/internal/games/splendor/domain/game"
+	"github.com/nciyuan9264/game-backend/pkg/gamehistory"
 	"github.com/nciyuan9264/game-backend/pkg/roomcore"
 )
 
@@ -15,6 +16,12 @@ import (
 type RoomService struct {
 	Room *domain.Room
 	svc  *roomcore.Service[*RoomService]
+
+	// History recording fields.
+	Recorder         *gamehistory.Recorder
+	HistorySeq       int
+	HistoryStartedAt time.Time
+	HistoryEnded     bool
 }
 
 // MaxPlayers splendor 上限玩家数。
@@ -31,17 +38,31 @@ func (r *RoomService) Run() {
 		select {
 		case cmd := <-r.Room.CmdCh:
 			r.handleCommand(cmd)
+
+			// 开局：handleAllReady 全员到齐后切到 Playing 且 GameStartTime 已赋值，启动 recorder。
+			if r.Recorder == nil && !r.HistoryEnded && r.Room.State.RoomStatus != domain.RoomStatusMatch &&
+				r.Room.State.RoomStatus != domain.RoomStatusWaiting && !r.Room.State.GameStartTime.IsZero() {
+				r.startRecording()
+			}
+
+			// 命令落库（白名单内才记录）。
+			r.recordEvent(cmd)
+
 			roomcore.RearmThinkTimer(r.svc)
 			if r.Room.State.RoomStatus == domain.RoomStatusMatch {
 				game.BroadcastToMatch(r.Room)
 			} else {
 				game.BroadcastToRoom(r.Room)
+				if r.Room.State.RoomStatus == domain.RoomStatusEnd && r.Recorder != nil {
+					r.finishRecording()
+				}
 			}
 		case <-r.Room.Base.HealthTickChan():
 			roomcore.HandleHealthTick(r.svc)
 		case <-r.Room.QuitCh:
 			roomcore.StopHealthCheck(r.svc)
 			roomcore.StopThinkTimer(r.svc)
+			r.stopRecording()
 			return
 		}
 	}
@@ -70,11 +91,18 @@ func (r *RoomService) handleCommand(cmd domain.Command) {
 		game.HandleBuyCardMessage(r.Room, cmd)
 	case "game_preserve_card":
 		game.HandleReserveCardMessage(r.Room, cmd)
+	case "turn_timeout":
+		game.HandleTurnTimeoutMessage(r.Room, cmd)
 	case "game_end":
 		game.HandleGameEndMessage(r.Room, cmd)
 	case "game_play_audio":
 		game.HandlePlayAudioMessage(r.Room, cmd)
 	case "game_restart_game":
+		// 重开局：先把上一局的 recorder 关掉，重置历史状态，再让 handler 重置 game state。
+		r.stopRecording()
+		r.HistoryEnded = false
+		r.HistorySeq = 0
+		r.HistoryStartedAt = time.Time{}
 		game.HandleRestartGameMessage(r.Room, cmd)
 	default:
 		log.Printf("⚠️ 未知命令类型: %s", cmd.Type)
