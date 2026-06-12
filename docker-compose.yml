@@ -1,7 +1,11 @@
 services:
-  acquire-v2:
-    container_name: backend-acquire-v2
-    image: ${TCR_LOGIN_SERVER}/tengxuntcr/acquire:latest
+  acquire:
+    container_name: backend-acquire
+    build:
+      context: .
+      dockerfile: deployments/Dockerfile
+      args:
+        GAME: acquire
     environment:
       - POSTGRES_DSN=${POSTGRES_DSN}
     volumes:
@@ -9,22 +13,40 @@ services:
     networks:
       - global-network
     ports:
-      - '8001:8000'
-    restart: always
-
-  davinci-v2:
-    container_name: backend-davinci-v2
-    image: ${TCR_LOGIN_SERVER}/tengxuntcr/davinci:latest
-    environment:
-      - POSTGRES_DSN=${POSTGRES_DSN}
-    volumes:
-      - /var/log/da_vinci_code:/app/game_logs
-    networks:
-      - global-network
-    ports:
       - '8000:8000'
     restart: always
 
+  davinci:
+    container_name: backend-davinci
+    build:
+      context: .
+      dockerfile: deployments/Dockerfile
+      args:
+        GAME: davinci
+    environment:
+      - POSTGRES_DSN=${POSTGRES_DSN}
+    volumes:
+      - /var/log/davinci:/app/game_logs
+    networks:
+      - global-network
+    ports:
+      - '8001:8000'
+    restart: always
+
+  # splendor:
+  #   container_name: backend-splendor
+  #   build:
+  #     context: .
+  #     dockerfile: deployments/Dockerfile
+  #     args:
+  #       GAME: splendor
+  #   environment:
+  #     - POSTGRES_DSN=${POSTGRES_DSN}
+  #   volumes:
+  #     - /var/log/splendor:/app/game_logs
+  #   networks:
+  #     - global-network
+  #   restart: always
 
 networks:
   global-network:
