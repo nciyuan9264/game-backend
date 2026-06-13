@@ -17,6 +17,7 @@ type Game struct {
 	DurationSeconds int            `json:"durationSeconds"`
 	WinnerUserID    *int64         `json:"winnerUserID,omitempty"`
 	WinnerPlayerID  string         `gorm:"size:64" json:"winnerPlayerID,omitempty"`
+	EndReason       string         `gorm:"size:32;index" json:"endReason,omitempty"`
 	MaxPlayers      int            `json:"maxPlayers"`
 	InitialState    datatypes.JSON `json:"initialState"`
 	FinalResult     datatypes.JSON `json:"finalResult,omitempty"`

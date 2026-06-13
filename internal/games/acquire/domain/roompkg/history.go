@@ -16,6 +16,8 @@ import (
 // HistoryRepo 全局单例，由 init code 在 InitPostgres 后注入。
 var HistoryRepo *gamehistory.Repo
 
+const acquireMaxTiles = 108
+
 // InitHistoryRepo 由 cmd/acquire 在 database.InitPostgres 后调用。
 func InitHistoryRepo() {
 	if database.DB == nil {
@@ -114,6 +116,119 @@ func (r *RoomService) recordEvent(cmd domain.Command) {
 	r.HistorySeq++
 }
 
+func (r *RoomService) shouldRecordAbandoned() bool {
+	if r == nil || r.Room == nil || r.Room.State == nil {
+		return false
+	}
+	if r.Room.State.GameStartTime.IsZero() {
+		return false
+	}
+	placedTiles := 0
+	for _, tile := range r.Room.State.BoardTiles {
+		if tile != nil && tile.Belong != "" {
+			placedTiles++
+		}
+	}
+	return placedTiles*2 >= acquireMaxTiles
+}
+
+func acquirePlacedTiles(r *domain.Room) int {
+	if r == nil || r.State == nil {
+		return 0
+	}
+	placedTiles := 0
+	for _, tile := range r.State.BoardTiles {
+		if tile != nil && tile.Belong != "" {
+			placedTiles++
+		}
+	}
+	return placedTiles
+}
+
+type acquireScoreItem struct {
+	playerID string
+	money    int
+	stocks   int
+	total    int
+}
+
+func acquireScoreItems(r *domain.Room) []acquireScoreItem {
+	if r == nil || r.State == nil {
+		return nil
+	}
+	companyInfoMap := r.State.Companies
+	scores := make([]acquireScoreItem, 0, len(r.Connections))
+	for pid, pc := range r.Connections {
+		if pc == nil {
+			continue
+		}
+		ps, ok := r.State.Players[pid]
+		if !ok || ps == nil {
+			continue
+		}
+		money := ps.Money
+		stocks := 0
+		for company, count := range ps.Stocks {
+			if c, ok := companyInfoMap[company]; ok && c != nil {
+				stocks += count * c.StockPrice
+			}
+		}
+		scores = append(scores, acquireScoreItem{
+			playerID: pid,
+			money:    money,
+			stocks:   stocks,
+			total:    money + stocks,
+		})
+	}
+	sort.Slice(scores, func(i, j int) bool {
+		if scores[i].total != scores[j].total {
+			return scores[i].total > scores[j].total
+		}
+		return scores[i].playerID < scores[j].playerID
+	})
+	return scores
+}
+
+func buildAcquireFinalPlayers(r *domain.Room, abandoned bool) ([]gamehistory.GamePlayer, string, *int64) {
+	scores := acquireScoreItems(r)
+	winnerPlayerID := ""
+	var winnerUserID *int64
+	if !abandoned && len(scores) > 0 {
+		winnerPlayerID = scores[0].playerID
+		if pc := r.Connections[winnerPlayerID]; pc != nil && !pc.AI {
+			if uid, ok := gamehistory.ParseUserIDFromPlayerID(winnerPlayerID); ok {
+				winnerUserID = &uid
+			}
+		}
+	}
+
+	playersIn := make([]gamehistory.GamePlayer, 0, len(scores))
+	rank := 0
+	prevTotal := 0
+	abandonedRank := len(scores)
+	for i, s := range scores {
+		if abandoned {
+			rank = abandonedRank
+		} else if i == 0 || s.total != prevTotal {
+			rank = i + 1
+			prevTotal = s.total
+		}
+		money := s.money
+		score := s.total
+		stocks := s.stocks
+		finalRank := rank
+		playersIn = append(playersIn, gamehistory.GamePlayer{
+			PlayerID:    s.playerID,
+			FinalMoney:  &money,
+			FinalScore:  &score,
+			FinalStocks: stocks,
+			FinalRank:   &finalRank,
+			IsWinner:    !abandoned && s.playerID == winnerPlayerID,
+		})
+	}
+	return playersIn, winnerPlayerID, winnerUserID
+}
+
 // finishRecording 终局时调用：算 winner / final_score，并把整局事务性落库。
 func (r *RoomService) finishRecording() {
 	if r.Recorder == nil {
@@ -129,58 +244,6 @@ func (r *RoomService) finishRecording() {
 		finalResultJSON = nil
 	}
 
-	// 计算每个玩家的 final_score（money + stocks 估值）。
-	companyInfoMap := r.Room.State.Companies
-	type scoreItem struct {
-		playerID string
-		money    int
-		stocks   int
-		total    int
-	}
-	scores := make([]scoreItem, 0, len(r.Room.Connections))
-	for pid, pc := range r.Room.Connections {
-		if pc == nil {
-			continue
-		}
-		ps, ok := r.Room.State.Players[pid]
-		if !ok || ps == nil {
-			continue
-		}
-		money := ps.Money
-		stocks := 0
-		// 复用 game.CalculateTotalValue 的逻辑（避免循环 import，这里手算）。
-		for company, count := range ps.Stocks {
-			if c, ok := companyInfoMap[company]; ok && c != nil {
-				stocks += count * c.StockPrice
-			}
-		}
-		scores = append(scores, scoreItem{
-			playerID: pid,
-			money:    money,
-			stocks:   stocks,
-			total:    money + stocks,
-		})
-	}
-
-	// 选 winner：total 最大；并列时取 player_id 字母序小者。
-	sort.Slice(scores, func(i, j int) bool {
-		if scores[i].total != scores[j].total {
-			return scores[i].total > scores[j].total
-		}
-		return scores[i].playerID < scores[j].playerID
-	})
-
-	var winnerUserID *int64
-	winnerPlayerID := ""
-	if len(scores) > 0 {
-		winnerPlayerID = scores[0].playerID
-		if pc := r.Room.Connections[winnerPlayerID]; pc != nil && !pc.AI {
-			if uid, ok := gamehistory.ParseUserIDFromPlayerID(winnerPlayerID); ok {
-				winnerUserID = &uid
-			}
-		}
-	}
-
 	endedAt := time.Now()
 	startedAt := r.HistoryStartedAt
 	if startedAt.IsZero() {
@@ -188,33 +251,14 @@ func (r *RoomService) finishRecording() {
 	}
 	duration := int(endedAt.Sub(startedAt).Seconds())
 
-	playersIn := make([]gamehistory.GamePlayer, 0, len(scores))
-	rank := 0
-	prevTotal := 0
-	for i, s := range scores {
-		if i == 0 || s.total != prevTotal {
-			rank = i + 1
-			prevTotal = s.total
-		}
-		money := s.money
-		score := s.total
-		stocks := s.stocks
-		finalRank := rank
-		playersIn = append(playersIn, gamehistory.GamePlayer{
-			PlayerID:    s.playerID,
-			FinalMoney:  &money,
-			FinalScore:  &score,
-			FinalStocks: stocks,
-			FinalRank:   &finalRank,
-			IsWinner:    s.playerID == winnerPlayerID,
-		})
-	}
+	playersIn, winnerPlayerID, winnerUserID := buildAcquireFinalPlayers(r.Room, false)
 
 	gameID, err := r.Recorder.Commit(context.Background(), gamehistory.CommitInput{
 		EndedAt:         endedAt,
 		DurationSeconds: duration,
 		WinnerUserID:    winnerUserID,
 		WinnerPlayerID:  winnerPlayerID,
+		EndReason:       gamehistory.EndReasonCompleted,
 		FinalResult:     finalResultJSON,
 		Players:         playersIn,
 	})
@@ -231,6 +275,65 @@ func (r *RoomService) finishRecording() {
 		logger.F("game_id", gameID),
 		logger.F("room_id", r.Room.ID),
 		logger.F("winner", winnerPlayerID),
+		logger.F("duration_s", duration))
+}
+
+func (r *RoomService) finishAbandonedRecording(now time.Time) {
+	if r.Recorder == nil {
+		return
+	}
+	if r.HistoryEnded {
+		return
+	}
+	if !r.shouldRecordAbandoned() {
+		r.stopRecording()
+		return
+	}
+
+	result, _ := acgame.RecomputeDerivedState(r.Room)
+	finalResult := map[string]any{
+		"abandoned": true,
+		"reason":    "no_human_after_progress_half",
+		"progress": map[string]int{
+			"placedTiles": acquirePlacedTiles(r.Room),
+			"maxTiles":    acquireMaxTiles,
+		},
+		"snapshot": result,
+	}
+	finalResultJSON, err := json.Marshal(finalResult)
+	if err != nil {
+		logger.Error("序列化 abandoned final_result 失败", logger.F("room_id", r.Room.ID), logger.F("error", err))
+		finalResultJSON = nil
+	}
+
+	startedAt := r.HistoryStartedAt
+	if startedAt.IsZero() {
+		startedAt = now
+	}
+	duration := int(now.Sub(startedAt).Seconds())
+	playersIn, winnerPlayerID, winnerUserID := buildAcquireFinalPlayers(r.Room, true)
+
+	gameID, err := r.Recorder.Commit(context.Background(), gamehistory.CommitInput{
+		EndedAt:         now,
+		DurationSeconds: duration,
+		WinnerUserID:    winnerUserID,
+		WinnerPlayerID:  winnerPlayerID,
+		EndReason:       gamehistory.EndReasonAbandoned,
+		FinalResult:     finalResultJSON,
+		Players:         playersIn,
+	})
+	if err != nil {
+		logger.Error("history abandoned finish failed",
+			logger.F("room_id", r.Room.ID),
+			logger.F("error", err))
+	}
+
+	r.Recorder = nil
+	r.HistorySeq = 0
+	r.HistoryEnded = true
+	logger.Info("history abandoned recording finished",
+		logger.F("game_id", gameID),
+		logger.F("room_id", r.Room.ID),
 		logger.F("duration_s", duration))
 }
 

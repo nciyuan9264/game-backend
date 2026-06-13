@@ -46,6 +46,7 @@ func (r *RoomService) Run() {
 		case <-r.Room.QuitCh:
 			roomcore.StopHealthCheck(r.svc)
 			roomcore.StopThinkTimer(r.svc)
+			r.finishAbandonedHistory(time.Now())
 			return
 		}
 	}

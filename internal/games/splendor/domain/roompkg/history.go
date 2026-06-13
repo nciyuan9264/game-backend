@@ -16,6 +16,8 @@ import (
 // HistoryRepo 全局单例，由 cmd/splendor 在 InitPostgres 后注入。
 var HistoryRepo *gamehistory.Repo
 
+const splendorWinScore = 15
+
 // InitHistoryRepo 由 cmd/splendor 在 database.InitPostgres 后调用。
 func InitHistoryRepo() {
 	if database.DB == nil {
@@ -116,6 +118,103 @@ func (r *RoomService) recordEvent(cmd domain.Command) {
 	r.HistorySeq++
 }
 
+func (r *RoomService) shouldRecordAbandoned() bool {
+	if r == nil || r.Room == nil || r.Room.State == nil {
+		return false
+	}
+	if r.Room.State.GameStartTime.IsZero() {
+		return false
+	}
+	return splendorMaxScore(r.Room)*2 >= splendorWinScore
+}
+
+func splendorMaxScore(r *domain.Room) int {
+	if r == nil || r.State == nil {
+		return 0
+	}
+	maxScore := 0
+	for _, ps := range r.State.Players {
+		if ps != nil && ps.Score > maxScore {
+			maxScore = ps.Score
+		}
+	}
+	return maxScore
+}
+
+type splendorScoreItem struct {
+	playerID string
+	score    int
+	cards    int
+}
+
+func splendorScoreItems(r *domain.Room) []splendorScoreItem {
+	if r == nil || r.State == nil {
+		return nil
+	}
+	scores := make([]splendorScoreItem, 0, len(r.Connections))
+	for pid, pc := range r.Connections {
+		if pc == nil {
+			continue
+		}
+		ps, ok := r.State.Players[pid]
+		if !ok || ps == nil {
+			continue
+		}
+		scores = append(scores, splendorScoreItem{
+			playerID: pid,
+			score:    ps.Score,
+			cards:    len(ps.NormalCard),
+		})
+	}
+	sort.Slice(scores, func(i, j int) bool {
+		if scores[i].score != scores[j].score {
+			return scores[i].score > scores[j].score
+		}
+		if scores[i].cards != scores[j].cards {
+			return scores[i].cards < scores[j].cards
+		}
+		return scores[i].playerID < scores[j].playerID
+	})
+	return scores
+}
+
+func buildSplendorFinalPlayers(r *domain.Room, abandoned bool) ([]gamehistory.GamePlayer, string, *int64) {
+	scores := splendorScoreItems(r)
+	winnerPlayerID := ""
+	var winnerUserID *int64
+	if !abandoned && len(scores) > 0 {
+		winnerPlayerID = scores[0].playerID
+		if pc := r.Connections[winnerPlayerID]; pc != nil && !pc.AI {
+			if uid, ok := gamehistory.ParseUserIDFromPlayerID(winnerPlayerID); ok {
+				winnerUserID = &uid
+			}
+		}
+	}
+
+	playersIn := make([]gamehistory.GamePlayer, 0, len(scores))
+	rank := 0
+	prevScore, prevCards := -1, -1
+	abandonedRank := len(scores)
+	for i, s := range scores {
+		if abandoned {
+			rank = abandonedRank
+		} else if i == 0 || s.score != prevScore || s.cards != prevCards {
+			rank = i + 1
+			prevScore = s.score
+			prevCards = s.cards
+		}
+		score := s.score
+		finalRank := rank
+		playersIn = append(playersIn, gamehistory.GamePlayer{
+			PlayerID:   s.playerID,
+			FinalScore: &score,
+			FinalRank:  &finalRank,
+			IsWinner:   !abandoned && s.playerID == winnerPlayerID,
+		})
+	}
+	return playersIn, winnerPlayerID, winnerUserID
+}
+
 // finishRecording 终局时调用：算 winner / final_score（荣誉分），并把整局事务性落库。
 func (r *RoomService) finishRecording() {
 	if r.Recorder == nil {
@@ -129,50 +228,6 @@ func (r *RoomService) finishRecording() {
 		finalResultJSON = nil
 	}
 
-	// 计算每个玩家的终局信息：荣誉分 + 发展卡数量（用于并列时的次级排序）。
-	type scoreItem struct {
-		playerID string
-		score    int
-		cards    int
-	}
-	scores := make([]scoreItem, 0, len(r.Room.Connections))
-	for pid, pc := range r.Room.Connections {
-		if pc == nil {
-			continue
-		}
-		ps, ok := r.Room.State.Players[pid]
-		if !ok || ps == nil {
-			continue
-		}
-		scores = append(scores, scoreItem{
-			playerID: pid,
-			score:    ps.Score,
-			cards:    len(ps.NormalCard),
-		})
-	}
-
-	// 排序：荣誉分高者优先；并列时发展卡少者优先（splendor 官方平局规则）；仍并列取 playerID 字母序。
-	sort.Slice(scores, func(i, j int) bool {
-		if scores[i].score != scores[j].score {
-			return scores[i].score > scores[j].score
-		}
-		if scores[i].cards != scores[j].cards {
-			return scores[i].cards < scores[j].cards
-		}
-		return scores[i].playerID < scores[j].playerID
-	})
-
-	var winnerUserID *int64
-	winnerPlayerID := ""
-	if len(scores) > 0 {
-		winnerPlayerID = scores[0].playerID
-		if pc := r.Room.Connections[winnerPlayerID]; pc != nil && !pc.AI {
-			if uid, ok := gamehistory.ParseUserIDFromPlayerID(winnerPlayerID); ok {
-				winnerUserID = &uid
-			}
-		}
-	}
-
 	endedAt := time.Now()
 	startedAt := r.HistoryStartedAt
 	if startedAt.IsZero() {
@@ -180,30 +235,14 @@ func (r *RoomService) finishRecording() {
 	}
 	duration := int(endedAt.Sub(startedAt).Seconds())
 
-	playersIn := make([]gamehistory.GamePlayer, 0, len(scores))
-	rank := 0
-	prevScore, prevCards := -1, -1
-	for i, s := range scores {
-		if i == 0 || s.score != prevScore || s.cards != prevCards {
-			rank = i + 1
-			prevScore = s.score
-			prevCards = s.cards
-		}
-		score := s.score
-		finalRank := rank
-		playersIn = append(playersIn, gamehistory.GamePlayer{
-			PlayerID:   s.playerID,
-			FinalScore: &score,
-			FinalRank:  &finalRank,
-			IsWinner:   s.playerID == winnerPlayerID,
-		})
-	}
+	playersIn, winnerPlayerID, winnerUserID := buildSplendorFinalPlayers(r.Room, false)
 
 	gameID, err := r.Recorder.Commit(context.Background(), gamehistory.CommitInput{
 		EndedAt:         endedAt,
 		DurationSeconds: duration,
 		WinnerUserID:    winnerUserID,
 		WinnerPlayerID:  winnerPlayerID,
+		EndReason:       gamehistory.EndReasonCompleted,
 		FinalResult:     finalResultJSON,
 		Players:         playersIn,
 	})
@@ -218,6 +257,64 @@ func (r *RoomService) finishRecording() {
 		logger.F("game_id", gameID),
 		logger.F("room_id", r.Room.ID),
 		logger.F("winner", winnerPlayerID),
+		logger.F("duration_s", duration))
+}
+
+func (r *RoomService) finishAbandonedRecording(now time.Time) {
+	if r.Recorder == nil {
+		return
+	}
+	if r.HistoryEnded {
+		return
+	}
+	if !r.shouldRecordAbandoned() {
+		r.stopRecording()
+		return
+	}
+
+	result := spgame.RecomputeDerivedState(r.Room)
+	maxScore := splendorMaxScore(r.Room)
+	finalResult := map[string]any{
+		"abandoned": true,
+		"reason":    "no_human_after_progress_half",
+		"progress": map[string]int{
+			"maxScore": maxScore,
+			"winScore": splendorWinScore,
+		},
+		"snapshot": result,
+	}
+	finalResultJSON, err := json.Marshal(finalResult)
+	if err != nil {
+		logger.Error("序列化 abandoned final_result 失败", logger.F("room_id", r.Room.ID), logger.F("error", err))
+		finalResultJSON = nil
+	}
+
+	startedAt := r.HistoryStartedAt
+	if startedAt.IsZero() {
+		startedAt = now
+	}
+	duration := int(now.Sub(startedAt).Seconds())
+	playersIn, winnerPlayerID, winnerUserID := buildSplendorFinalPlayers(r.Room, true)
+
+	gameID, err := r.Recorder.Commit(context.Background(), gamehistory.CommitInput{
+		EndedAt:         now,
+		DurationSeconds: duration,
+		WinnerUserID:    winnerUserID,
+		WinnerPlayerID:  winnerPlayerID,
+		EndReason:       gamehistory.EndReasonAbandoned,
+		FinalResult:     finalResultJSON,
+		Players:         playersIn,
+	})
+	if err != nil {
+		logger.Error("history abandoned finish failed", logger.F("room_id", r.Room.ID), logger.F("error", err))
+	}
+
+	r.Recorder = nil
+	r.HistorySeq = 0
+	r.HistoryEnded = true
+	logger.Info("history abandoned recording finished",
+		logger.F("game_id", gameID),
+		logger.F("room_id", r.Room.ID),
 		logger.F("duration_s", duration))
 }
 
