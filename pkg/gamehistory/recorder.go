@@ -95,6 +95,7 @@ type CommitInput struct {
 	DurationSeconds int
 	WinnerUserID    *int64
 	WinnerPlayerID  string
+	EndReason       string
 	FinalResult     []byte
 	Players         []GamePlayer
 }
@@ -114,6 +115,9 @@ func (r *Recorder) Commit(ctx context.Context, in CommitInput) (int64, error) {
 	r.game.DurationSeconds = in.DurationSeconds
 	r.game.WinnerUserID = in.WinnerUserID
 	r.game.WinnerPlayerID = in.WinnerPlayerID
+	if in.EndReason != "" {
+		r.game.EndReason = in.EndReason
+	}
 	if len(in.FinalResult) > 0 {
 		r.game.FinalResult = datatypes.JSON(in.FinalResult)
 	}

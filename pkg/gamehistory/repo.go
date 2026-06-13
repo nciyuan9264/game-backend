@@ -161,7 +161,9 @@ type Stats struct {
 	AvgScore   float64 `json:"avgScore"`
 }
 
-// StatsByUser computes win-rate stats scoped by game type.
+// StatsByUser computes win-rate stats scoped by game type. ended_at IS NOT
+// NULL means the game has a persisted result, including completed games and
+// progress-qualified abandoned games.
 func (r *Repo) StatsByUser(ctx context.Context, userID int64, gameType string) (Stats, error) {
 	var s Stats
 	type row struct {
@@ -200,7 +202,8 @@ type LeaderboardEntry struct {
 	AvgRank    *float64 `json:"avgRank,omitempty"`
 }
 
-// Leaderboard 返回指定 game_type 的全玩家聚合排行榜。
+// Leaderboard 返回指定 game_type 的全玩家聚合排行榜。ended_at IS NOT NULL
+// 的记录会计入排行，包括自然终局和进度过半后的弃局补录。
 func (r *Repo) Leaderboard(ctx context.Context, gameType string, limit, offset int) ([]LeaderboardEntry, error) {
 	if limit <= 0 {
 		limit = 50

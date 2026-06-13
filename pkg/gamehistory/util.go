@@ -8,6 +8,11 @@ import (
 	"gorm.io/datatypes"
 )
 
+const (
+	EndReasonCompleted = "completed"
+	EndReasonAbandoned = "abandoned"
+)
+
 func ParseUserIDFromPlayerID(playerID string) (int64, bool) {
 	idx := strings.LastIndex(playerID, "-")
 	if idx < 0 || idx == len(playerID)-1 {
