@@ -156,12 +156,166 @@ func bandStepGain(company string, currentTiles, delta int) (priceDelta int, bonu
 	return nxt.Price - cur.Price, nxt.BonusFirst - cur.BonusFirst
 }
 
+func estimatePlayerStockValue(r *domain.Room, playerID string) int {
+	if r == nil || r.State == nil || r.State.Players == nil || r.State.Companies == nil {
+		return 0
+	}
+	p, ok := r.State.Players[playerID]
+	if !ok || p == nil {
+		return 0
+	}
+	total := 0
+	for company, count := range p.Stocks {
+		info := r.State.Companies[company]
+		if info == nil || info.Tiles == 0 || count <= 0 {
+			continue
+		}
+		total += count * info.StockPrice
+	}
+	return total
+}
+
+func estimatePlayerTotalValue(r *domain.Room, playerID string) int {
+	if r == nil || r.State == nil || r.State.Players == nil {
+		return 0
+	}
+	p, ok := r.State.Players[playerID]
+	if !ok || p == nil {
+		return 0
+	}
+	return p.Money + estimatePlayerStockValue(r, playerID)
+}
+
+func leadingOpponent(r *domain.Room, me string) (playerID string, lead int) {
+	if r == nil || r.State == nil || r.State.Players == nil {
+		return "", 0
+	}
+	myValue := estimatePlayerTotalValue(r, me)
+	bestHuman := ""
+	bestHumanValue := math.MinInt
+	bestAny := ""
+	bestAnyValue := math.MinInt
+	for pid := range r.State.Players {
+		if pid == me {
+			continue
+		}
+		value := estimatePlayerTotalValue(r, pid)
+		if value > bestAnyValue {
+			bestAnyValue = value
+			bestAny = pid
+		}
+		pc, ok := r.Connections[pid]
+		if !ok || pc == nil || !pc.AI {
+			if value > bestHumanValue {
+				bestHumanValue = value
+				bestHuman = pid
+			}
+		}
+	}
+	if bestHuman != "" {
+		return bestHuman, bestHumanValue - myValue
+	}
+	if bestAny != "" {
+		return bestAny, bestAnyValue - myValue
+	}
+	return "", 0
+}
+
+func companyHolderCounts(r *domain.Room, company string) map[string]int {
+	counts := make(map[string]int)
+	if r == nil || r.State == nil || r.State.Players == nil {
+		return counts
+	}
+	for pid, p := range r.State.Players {
+		if p == nil || p.Stocks == nil {
+			continue
+		}
+		if count := p.Stocks[company]; count > 0 {
+			counts[pid] = count
+		}
+	}
+	return counts
+}
+
+func holderRankValueFromCounts(counts map[string]int, playerID string) int {
+	myCount := counts[playerID]
+	if myCount <= 0 {
+		return 0
+	}
+	first := 0
+	second := 0
+	for _, count := range counts {
+		switch {
+		case count > first:
+			second = first
+			first = count
+		case count < first && count > second:
+			second = count
+		}
+	}
+	if myCount >= first {
+		return 2
+	}
+	if second > 0 && myCount >= second {
+		return 1
+	}
+	return 0
+}
+
+func holderRankValue(r *domain.Room, playerID string, company string) int {
+	return holderRankValueFromCounts(companyHolderCounts(r, company), playerID)
+}
+
+func rankValueAfterStockDelta(r *domain.Room, playerID string, company string, delta int) int {
+	counts := companyHolderCounts(r, company)
+	counts[playerID] += delta
+	if counts[playerID] <= 0 {
+		delete(counts, playerID)
+	}
+	return holderRankValueFromCounts(counts, playerID)
+}
+
+func opponentBenefitPenalty(r *domain.Room, me string, company string, amount int) int {
+	leader, lead := leadingOpponent(r, me)
+	if leader == "" {
+		return 0
+	}
+	rank := holderRankValue(r, leader, company)
+	if rank == 0 {
+		return 0
+	}
+	penalty := amount * rank
+	if lead > 0 {
+		penalty += lead / 20
+	}
+	return penalty
+}
+
+func mergerBonusValue(r *domain.Room, playerID string, company string) int {
+	info := r.State.Companies[company]
+	if info == nil {
+		return 0
+	}
+	si := stockInfoOf(company, info.Tiles)
+	if si == nil {
+		return 0
+	}
+	switch holderRankValue(r, playerID, company) {
+	case 2:
+		return si.BonusFirst
+	case 1:
+		return si.BonusSecond
+	default:
+		return 0
+	}
+}
+
 // ----------------------------------------------------------------------------
 // 决策函数
 // ----------------------------------------------------------------------------
 
 // scoreTilePlacement 给一张候选 tile 评分，分数越高越值得下。
-func scoreTilePlacement(r *domain.Room, me, tileKey string, companies map[string]struct{}, blankCount int) int {
+func scoreTilePlacement(r *domain.Room, me, _ string, companies map[string]struct{}, blankCount int) int {
 	if len(companies) == 0 && blankCount == 0 {
 		return 1 // 孤立落点，保底分
 	}
@@ -173,59 +327,87 @@ func scoreTilePlacement(r *domain.Room, me, tileKey string, companies map[string
 		}
 		info := r.State.Companies[only]
 		dom := dominanceScore(r, me, only)
+		leader, lead := leadingOpponent(r, me)
+		leaderRank := holderRankValue(r, leader, only)
 		// 扩张后该公司新增 tile 数 ≈ blankCount + 1（含放下的这块）
-		_, bonusGain := bandStepGain(only, info.Tiles, blankCount+1)
-		score := dom*200 + bonusGain/10
+		priceGain, bonusGain := bandStepGain(only, info.Tiles, blankCount+1)
+		score := dom*300 + priceGain + bonusGain/8
 		if dom <= 0 {
 			// 给对手扩张是负价值
 			score -= info.StockPrice
 		} else {
-			score += info.StockPrice
+			score += info.StockPrice * dom
+		}
+		if leader != "" && leaderRank > 0 {
+			score -= info.StockPrice*leaderRank + opponentBenefitPenalty(r, me, only, info.StockPrice/2)
+			if lead > 0 {
+				score -= lead / 15
+			}
+		}
+		if dom > 0 && leaderRank == 0 {
+			score += info.StockPrice / 2
 		}
 		return score
 	}
 
 	if len(companies) >= 2 {
-		// 触发并购：累计奖金期望与对存活方持股价值
+		// 触发并购：优先自己拿分，避免给领先者送分。
 		score := 0
 		// 选 tile 最多的为存活方近似
 		mainTiles := -1
+		totalTiles := 1 + blankCount
 		var main string
 		for c := range companies {
-			if t := r.State.Companies[c].Tiles; t > mainTiles {
+			t := r.State.Companies[c].Tiles
+			totalTiles += t
+			if t > mainTiles {
 				mainTiles = t
 				main = c
 			}
 		}
+		leader, lead := leadingOpponent(r, me)
 		// 被吞公司的奖金期望
 		for c := range companies {
 			if c == main {
 				continue
 			}
 			info := r.State.Companies[c]
-			si := stockInfoOf(c, info.Tiles)
-			if si == nil {
-				continue
-			}
-			dom := dominanceScore(r, me, c)
-			switch dom {
-			case 2:
-				score += si.BonusFirst / 10
-			case 1:
-				score += si.BonusSecond / 10
-			default:
-				// 不持股：合并对自己中性
+			myBenefit := mergerBonusValue(r, me, c)
+			leaderBenefit := 0
+			if leader != "" {
+				leaderBenefit = mergerBonusValue(r, leader, c)
 			}
 			// 把被吞公司的持股按当前价折现
 			if p, ok := r.State.Players[me]; ok && p != nil {
-				score += p.Stocks[c] * info.StockPrice / 10
+				myBenefit += p.Stocks[c] * info.StockPrice
 			}
+			if leader != "" {
+				if p, ok := r.State.Players[leader]; ok && p != nil {
+					leaderBenefit += p.Stocks[c] * info.StockPrice
+				}
+			}
+			score += (myBenefit - leaderBenefit) / 8
 		}
 		// 对存活方的持股估值
 		if main != "" {
 			info := r.State.Companies[main]
+			futurePrice := info.StockPrice
+			if si := stockInfoOf(main, totalTiles); si != nil {
+				futurePrice = si.Price
+			}
 			if p, ok := r.State.Players[me]; ok && p != nil {
-				score += p.Stocks[main] * info.StockPrice / 10
+				score += p.Stocks[main] * futurePrice / 8
+			}
+			if leader != "" {
+				if p, ok := r.State.Players[leader]; ok && p != nil {
+					score -= p.Stocks[main] * futurePrice / 8
+				}
+				if holderRankValue(r, leader, main) > 0 && lead > 0 {
+					score -= lead / 20
+				}
+			}
+			if holderRankValue(r, me, main) > 0 {
+				score += futurePrice
 			}
 		}
 		return score
@@ -243,7 +425,16 @@ func scoreTilePlacement(r *domain.Room, me, tileKey string, companies map[string
 		if hasUncreated {
 			// 估算创建后的初始体量（连同 tileKey 自身的 Blank 连通块）
 			predictedSize := blankCount + 1
-			score := aiFounderBonus + predictedSize*50
+			score := aiFounderBonus + predictedSize*70
+			activeCompanies := 0
+			for _, info := range r.State.Companies {
+				if info != nil && info.Tiles > 0 {
+					activeCompanies++
+				}
+			}
+			if p, ok := r.State.Players[me]; ok && p != nil && p.Money < 1200 && activeCompanies > 0 {
+				score -= 120
+			}
 			return score
 		}
 	}
@@ -326,7 +517,8 @@ func chooseCompanyForAI(r *domain.Room) string {
 	return p3[0]
 }
 
-// scoreBuyCandidate 为购股候选打 ROI 分。
+// scoreBuyCandidate 为购股候选打 ROI 分。调用方会临时写入已买入的股票快照，
+// 因此这里可以安全地用当前 r.State 评估"再买 1 股"后的排名变化。
 func scoreBuyCandidate(r *domain.Room, me, company string) int {
 	info := r.State.Companies[company]
 	si := stockInfoOf(company, info.Tiles)
@@ -334,14 +526,50 @@ func scoreBuyCandidate(r *domain.Room, me, company string) int {
 		return math.MinInt
 	}
 	dom := dominanceScore(r, me, company)
+	beforeRank := holderRankValue(r, me, company)
+	afterRank := rankValueAfterStockDelta(r, me, company, 1)
 	// 进档时 1st 奖金跨档收益（粗略估计）
 	_, bonusGain := bandStepGain(company, info.Tiles, 1)
 	roi := bonusGain / 5
 	roi += dom * info.StockPrice
 	roi -= info.StockPrice
+	if afterRank > beforeRank {
+		roi += (afterRank - beforeRank) * info.StockPrice * 2
+		if afterRank == 2 {
+			roi += si.BonusFirst / 8
+		} else {
+			roi += si.BonusSecond / 8
+		}
+	}
+	if beforeRank == 0 && afterRank > 0 {
+		roi += info.StockPrice
+	}
 	// safe 公司加成（稳定收益）
 	if info.Tiles >= aiSafeCompanyTiles {
 		roi += info.StockPrice / 2
+	}
+	leader, lead := leadingOpponent(r, me)
+	if leader != "" {
+		leaderRank := holderRankValue(r, leader, company)
+		leaderCount := 0
+		myCount := 0
+		if p := r.State.Players[leader]; p != nil {
+			leaderCount = p.Stocks[company]
+		}
+		if p := r.State.Players[me]; p != nil {
+			myCount = p.Stocks[company]
+		}
+		if leaderRank > 0 {
+			if afterRank >= leaderRank && myCount+1 >= leaderCount {
+				roi += info.StockPrice * 2
+				if lead > 0 {
+					roi += lead / 12
+				}
+			}
+			if afterRank == 0 && leaderCount-myCount > 3 {
+				roi -= info.StockPrice + lead/20
+			}
+		}
 	}
 	return roi
 }
@@ -419,22 +647,29 @@ func chooseMergingSettleForAI(r *domain.Room, playerID string) []domain.MergingS
 		exchangeAmount := 0
 		sellAmount := count
 
-		// 2 股换 1 股：mainPrice >= 2*absorbedPrice 时换股净收益 ≥ 0；
-		// 主导地位 ≥ 1（已是 1st/2nd）则放宽到 mainPrice >= absorbedPrice。
-		mainDom := dominanceScore(r, playerID, r.State.MergeMainCompany)
+		maxEven := count
+		if maxEven%2 != 0 {
+			maxEven--
+		}
+		maxCanExchange := mainCompanyInfo.StockTotal * 2
+		maxEven = min2(maxEven, maxCanExchange)
+		beforeRank := holderRankValue(r, playerID, r.State.MergeMainCompany)
+		afterRank := rankValueAfterStockDelta(r, playerID, r.State.MergeMainCompany, maxEven/2)
+		leader, _ := leadingOpponent(r, playerID)
+		leaderRank := holderRankValue(r, leader, r.State.MergeMainCompany)
+
+		// 2 股换 1 股：mainPrice >= 2*absorbedPrice 时换股净收益 ≥ 0。
+		// 若换股能进入奖金区，允许以略低价格换股；若只会强化领先者控制，则卖出拿现金。
 		shouldExchange := mainCompanyInfo.StockPrice >= 2*company.StockPrice
-		if !shouldExchange && mainDom >= 1 && mainCompanyInfo.StockPrice >= company.StockPrice {
+		if !shouldExchange && afterRank > beforeRank && mainCompanyInfo.StockPrice >= company.StockPrice {
 			shouldExchange = true
 		}
+		if leaderRank > 0 && afterRank == 0 && mainCompanyInfo.StockPrice < 2*company.StockPrice {
+			shouldExchange = false
+		}
 
-		if shouldExchange {
-			maxEven := count
-			if maxEven%2 != 0 {
-				maxEven -= 1
-			}
-			// 主公司 stockTotal 限制：每 2 股换 1 股
-			maxCanExchange := mainCompanyInfo.StockTotal * 2
-			exchangeAmount = min2(maxEven, maxCanExchange)
+		if shouldExchange && maxEven > 0 {
+			exchangeAmount = maxEven
 			sellAmount = count - exchangeAmount
 		}
 
@@ -521,36 +756,51 @@ func chooseMergingSelectionForAI(r *domain.Room, playerID string, mainCompany []
 		return ""
 	}
 
-	// 估算合并后存活方的 tile 总和（用候选 + 其他 main 候选 tile 之和近似，
-	// 因为最终被吞公司中只有 ≥11 tile 的会被剔除，副公司大部分会并入存活方）。
-	otherTilesSum := 0
+	candidates := append([]string(nil), mainCompany...)
+	sort.Strings(candidates)
+	mergeTilesSum := 0
 	for _, c := range mainCompany {
-		otherTilesSum += r.State.Companies[c].Tiles
+		if info := r.State.Companies[c]; info != nil {
+			mergeTilesSum += info.Tiles
+		}
+	}
+	for _, c := range r.State.MergingSelection.OtherCompany {
+		if info := r.State.Companies[c]; info != nil && info.Tiles < aiSafeCompanyTiles {
+			mergeTilesSum += info.Tiles
+		}
 	}
 
 	res := ""
 	bestGain := math.MinInt
-	for _, companyKey := range mainCompany {
-		info := r.State.Companies[companyKey]
-		// 合并后 tile 数 ≈ otherTilesSum（自身 + 其他副公司之和）
-		predicted := otherTilesSum
+	leader, _ := leadingOpponent(r, playerID)
+	for _, companyKey := range candidates {
+		// 合并后 tile 数 ≈ 所有本次会并入的非 safe 公司 tile 总和。
+		predicted := mergeTilesSum
 		si := stockInfoOf(companyKey, predicted)
 		if si == nil {
 			continue
 		}
 		myStocks := r.State.Players[playerID].Stocks[companyKey]
-		gain := myStocks * si.Price
-		dom := dominanceScore(r, playerID, companyKey)
-		switch dom {
+		aiGain := myStocks * si.Price
+		switch holderRankValue(r, playerID, companyKey) {
 		case 2:
-			gain += si.BonusFirst
+			aiGain += si.BonusFirst
 		case 1:
-			gain += si.BonusSecond
+			aiGain += si.BonusSecond
 		}
-		// 平衡因素：不要选已 safe 但我没持股的
-		if myStocks == 0 && info.Tiles >= aiSafeCompanyTiles {
-			gain -= si.Price * 2
+		leaderGain := 0
+		if leader != "" {
+			if p := r.State.Players[leader]; p != nil {
+				leaderGain += p.Stocks[companyKey] * si.Price
+			}
+			switch holderRankValue(r, leader, companyKey) {
+			case 2:
+				leaderGain += si.BonusFirst
+			case 1:
+				leaderGain += si.BonusSecond
+			}
 		}
+		gain := aiGain - leaderGain
 		if gain > bestGain {
 			bestGain = gain
 			res = companyKey
@@ -558,7 +808,7 @@ func chooseMergingSelectionForAI(r *domain.Room, playerID string, mainCompany []
 	}
 	if res == "" {
 		// 兜底：取数组首项
-		return mainCompany[0]
+		return candidates[0]
 	}
 	return res
 }
