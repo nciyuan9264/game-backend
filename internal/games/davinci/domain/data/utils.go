@@ -2,12 +2,11 @@ package data
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"sort"
 
 	"github.com/nciyuan9264/game-backend/internal/games/davinci/domain/domain"
 	"github.com/nciyuan9264/game-backend/pkg/arrayutil"
-
-	"golang.org/x/exp/rand"
 )
 
 // GenerateAvailableCards 生成count个当前房间中未被任何玩家使用的 card
@@ -65,7 +64,7 @@ func InitPlayerData(r *domain.Room, playerID string) error {
 	})
 
 	for _, joker := range jokers {
-		pos := rand.Intn(len(normal) + 1)
+		pos := rand.IntN(len(normal) + 1)
 		normal = append(normal, nil)
 		copy(normal[pos+1:], normal[pos:])
 		normal[pos] = joker

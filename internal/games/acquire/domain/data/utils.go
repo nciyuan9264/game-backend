@@ -3,14 +3,13 @@ package data
 import (
 	"fmt"
 	"hash/fnv"
+	"math/rand/v2"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/domain"
 	"github.com/nciyuan9264/game-backend/pkg/arrayutil"
-
-	"golang.org/x/exp/rand"
 )
 
 // GenerateAvailableTiles 生成count个当前房间中未被任何玩家使用的 tile
@@ -41,7 +40,8 @@ func GenerateAvailableTiles(room *domain.Room, count int) ([]string, error) {
 	sort.Strings(available)
 
 	if strings.HasSuffix(room.ID, "_ai_sim") {
-		rng := rand.New(rand.NewSource(deterministicAvailableTileSeed(room, available)))
+		seed := deterministicAvailableTileSeed(room, available)
+		rng := rand.New(rand.NewPCG(seed, ^seed))
 		rng.Shuffle(len(available), func(i, j int) { available[i], available[j] = available[j], available[i] })
 	} else {
 		rand.Shuffle(len(available), func(i, j int) { available[i], available[j] = available[j], available[i] })
