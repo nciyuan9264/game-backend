@@ -2,7 +2,10 @@ package data
 
 import (
 	"fmt"
+	"hash/fnv"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/domain"
 	"github.com/nciyuan9264/game-backend/pkg/arrayutil"
@@ -35,11 +38,69 @@ func GenerateAvailableTiles(room *domain.Room, count int) ([]string, error) {
 		}
 		available = append(available, tileID)
 	}
+	sort.Strings(available)
 
-	rand.Shuffle(len(available), func(i, j int) { available[i], available[j] = available[j], available[i] })
+	if strings.HasSuffix(room.ID, "_ai_sim") {
+		rng := rand.New(rand.NewSource(deterministicAvailableTileSeed(room, available)))
+		rng.Shuffle(len(available), func(i, j int) { available[i], available[j] = available[j], available[i] })
+	} else {
+		rand.Shuffle(len(available), func(i, j int) { available[i], available[j] = available[j], available[i] })
+	}
 	tiles := arrayutil.SafeSlice(available, count)
 
 	return tiles, nil
+}
+
+func deterministicAvailableTileSeed(room *domain.Room, available []string) uint64 {
+	h := fnv.New64a()
+	writeHash := func(format string, args ...interface{}) {
+		_, _ = fmt.Fprintf(h, format, args...)
+	}
+	writeHash("room=%s;current=%s;status=%s;", room.ID, room.State.CurrentPlayer, room.State.RoomStatus)
+
+	for _, tileID := range available {
+		writeHash("a=%s;", tileID)
+	}
+
+	playerIDs := make([]string, 0, len(room.State.Players))
+	for playerID := range room.State.Players {
+		playerIDs = append(playerIDs, playerID)
+	}
+	sort.Strings(playerIDs)
+	for _, playerID := range playerIDs {
+		player := room.State.Players[playerID]
+		if player == nil {
+			continue
+		}
+		writeHash("p=%s,m=%d;", playerID, player.Money)
+		tiles := append([]string(nil), player.Tiles...)
+		sort.Strings(tiles)
+		for _, tileID := range tiles {
+			writeHash("pt=%s;", tileID)
+		}
+		stockNames := make([]string, 0, len(player.Stocks))
+		for stockName := range player.Stocks {
+			stockNames = append(stockNames, stockName)
+		}
+		sort.Strings(stockNames)
+		for _, stockName := range stockNames {
+			writeHash("ps=%s:%d;", stockName, player.Stocks[stockName])
+		}
+	}
+
+	tileIDs := make([]string, 0, len(room.State.BoardTiles))
+	for tileID := range room.State.BoardTiles {
+		tileIDs = append(tileIDs, tileID)
+	}
+	sort.Strings(tileIDs)
+	for _, tileID := range tileIDs {
+		tile := room.State.BoardTiles[tileID]
+		if tile != nil && tile.Belong != "" {
+			writeHash("b=%s:%s;", tileID, tile.Belong)
+		}
+	}
+
+	return h.Sum64()
 }
 
 // GetConnectedTiles 用于从 tileKey 开始，递归查找相邻、归属一致的 tile

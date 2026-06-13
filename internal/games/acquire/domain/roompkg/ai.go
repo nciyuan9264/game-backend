@@ -484,6 +484,7 @@ func chooseCompanyForAI(r *domain.Room) string {
 	if len(uncreated) == 0 {
 		return ""
 	}
+	sort.Strings(uncreated)
 
 	priority1 := []string{"Continental", "Imperial"}
 	priority2 := []string{"American", "Festival", "Worldwide"}
@@ -814,10 +815,48 @@ func chooseMergingSelectionForAI(r *domain.Room, playerID string, mainCompany []
 }
 
 // buildAIActionMsg 根据当前 RoomStatus 选出"AI/超时"应当投递的命令 type+payload。
+// 真实入口只输出命令；搜索模拟必须在克隆房间内执行，不能向真实 CmdCh 投递命令。
 // 返回 ok=false 表示该状态下没有可投递的动作。
 //   - mergingSelection 阶段需要的 mainCompany 候选优先取 explicitMainCompany（来自前端 tempData），
 //     若为空则回退到 r.State.MergingSelection.MainCompany（用于 turn_timeout 路径）。
 func buildAIActionMsg(r *domain.Room, playerID string, status domain.RoomStatus, explicitMainCompany []string) (cmdType string, payload []byte, ok bool) {
+	searchConfig, searchConfigName, aiPlayers := onlineAISearchConfigForRoom(r)
+	if action, found := chooseBestActionBySearch(r, playerID, status, explicitMainCompany, searchConfig); found {
+		if cmdType, payload, ok := payloadForAction(action); ok {
+			logger.Info("AI 使用搜索策略出手",
+				logger.F("room_id", r.ID),
+				logger.F("player_id", playerID),
+				logger.F("status", status),
+				logger.F("cmd_type", cmdType),
+				logger.F("ai_strategy", "search"),
+				logger.F("ai_players", aiPlayers),
+				logger.F("ai_config", searchConfigName),
+				logger.F("ai_weights", searchConfigName),
+				logger.F("depth", searchConfig.Depth),
+				logger.F("beam_width", searchConfig.BeamWidth),
+				logger.F("action_limit", searchConfig.ActionLimit),
+			)
+			return cmdType, payload, true
+		}
+	}
+	cmdType, payload, ok = buildAIActionMsgByHeuristic(r, playerID, status, explicitMainCompany)
+	if ok {
+		logger.Info("AI 使用启发式策略出手",
+			logger.F("room_id", r.ID),
+			logger.F("player_id", playerID),
+			logger.F("status", status),
+			logger.F("cmd_type", cmdType),
+			logger.F("ai_strategy", "heuristic"),
+			logger.F("ai_players", aiPlayers),
+			logger.F("ai_config", searchConfigName),
+			logger.F("ai_weights", searchConfigName),
+			logger.F("reason", "search_not_found"),
+		)
+	}
+	return cmdType, payload, ok
+}
+
+func buildAIActionMsgByHeuristic(r *domain.Room, playerID string, status domain.RoomStatus, explicitMainCompany []string) (cmdType string, payload []byte, ok bool) {
 	switch status {
 	case domain.RoomStatusSetTile:
 		tile := chooseTileForAI(r, playerID)
