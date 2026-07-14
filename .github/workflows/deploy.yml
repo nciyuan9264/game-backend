@@ -159,4 +159,4 @@ jobs:
           curl -X POST \
             ${{ secrets.FEISHU_WEBHOOK_URL }} \
             -H "Content-Type: application/json" \
-            -d '{"msg_type":"text","content":"部署成功！项目: game-backend"}'
+            -d '部署成功！项目: game-backend'

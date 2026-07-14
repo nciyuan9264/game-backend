@@ -71,10 +71,6 @@ func HandleTurnTimeoutMessage(r *domain.Room, cmd domain.Command) {
 		Payload:  json.RawMessage("null"),
 	}
 
-	SwitchToNextPlayer(r)
-
-	// 超时跳过也要遵守最后一轮的终局判定。
-	if r.State.RoomStatus == domain.RoomStatusLastTurn && r.State.CurrentPlayer == r.State.FirstPlayer {
-		r.State.RoomStatus = domain.RoomStatusEnd
-	}
+	// 统一收尾：超时跳过同样要遵守终局判定（进入最后一轮 / 回合闭环时结束）。
+	AdvanceTurn(r)
 }

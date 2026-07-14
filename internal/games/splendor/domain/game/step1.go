@@ -37,6 +37,10 @@ func countTokens(ps *domain.PlayerState) int {
 //   - 不能拿 Gold（万能币只能通过保留卡获得）；
 //   - 拿完后手中宝石不得超过 10。
 func HandleGetGemMessage(r *domain.Room, cmd domain.Command) {
+	if !isTurnPlayable(r) {
+		log.Printf("❌ 当前状态不可出手 room=%s status=%s", r.ID, r.State.RoomStatus)
+		return
+	}
 	if cmd.PlayerID != r.State.CurrentPlayer {
 		log.Printf("❌ 非当前玩家回合 room=%s player=%s", r.ID, cmd.PlayerID)
 		return
@@ -125,11 +129,16 @@ func HandleGetGemMessage(r *domain.Room, cmd domain.Command) {
 		Payload:  payloadJSON,
 	}
 
-	SwitchToNextPlayer(r)
+	// 统一收尾：拿宝石也可能发生在最后一轮，必须走同一套终局判定。
+	AdvanceTurn(r)
 }
 
 // HandleBuyCardMessage 处理购买发展卡（来自桌面明牌或玩家自己的保留卡）。
 func HandleBuyCardMessage(r *domain.Room, cmd domain.Command) {
+	if !isTurnPlayable(r) {
+		log.Printf("❌ 当前状态不可出手 room=%s status=%s", r.ID, r.State.RoomStatus)
+		return
+	}
 	if cmd.PlayerID != r.State.CurrentPlayer {
 		log.Printf("❌ 非当前玩家回合 room=%s player=%s", r.ID, cmd.PlayerID)
 		return
@@ -234,16 +243,8 @@ func HandleBuyCardMessage(r *domain.Room, cmd domain.Command) {
 	// 权威重算分数。
 	RecomputeDerivedState(r)
 
-	// 终局判定：任一玩家达到 15 分则进入最后一轮，回合循环回到首位玩家时结束。
-	if playerState.Score >= 15 && r.State.RoomStatus == domain.RoomStatusPlaying {
-		r.State.RoomStatus = domain.RoomStatusLastTurn
-	}
-
-	SwitchToNextPlayer(r)
-
-	if r.State.RoomStatus == domain.RoomStatusLastTurn && r.State.CurrentPlayer == r.State.FirstPlayer {
-		r.State.RoomStatus = domain.RoomStatusEnd
-	}
+	// 统一收尾：终局判定（进入最后一轮 / 回合闭环时结束）+ 切换下一位玩家。
+	AdvanceTurn(r)
 }
 
 // revealReplacement 翻开一张指定 Level 的隐藏卡到桌面。
@@ -299,6 +300,10 @@ func settleNoble(r *domain.Room, playerState *domain.PlayerState) {
 //   - 若房间仍有 Gold 且玩家手中宝石未满 10，则获得 1 个 Gold；
 //   - Gold 用尽或手牌已满时仍可保留，只是拿不到 Gold。
 func HandleReserveCardMessage(r *domain.Room, cmd domain.Command) {
+	if !isTurnPlayable(r) {
+		log.Printf("❌ 当前状态不可出手 room=%s status=%s", r.ID, r.State.RoomStatus)
+		return
+	}
 	if cmd.PlayerID != r.State.CurrentPlayer {
 		log.Printf("❌ 非当前玩家回合 room=%s player=%s", r.ID, cmd.PlayerID)
 		return
@@ -356,5 +361,6 @@ func HandleReserveCardMessage(r *domain.Room, cmd domain.Command) {
 		Payload:  payloadJSON,
 	}
 
-	SwitchToNextPlayer(r)
+	// 统一收尾：保留卡也可能发生在最后一轮，必须走同一套终局判定。
+	AdvanceTurn(r)
 }

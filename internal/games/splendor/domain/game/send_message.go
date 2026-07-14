@@ -154,3 +154,41 @@ func SwitchToNextPlayer(r *domain.Room) {
 	next := r.PlayerSeq[(idx+1)%len(r.PlayerSeq)]
 	r.State.CurrentPlayer = next
 }
+
+// AdvanceTurn 是所有出手动作（拿宝石 / 买卡 / 保留卡 / 超时兜底）结束时的统一收尾：
+//  1. 若已有玩家达到 15 分且仍在进行中，则进入「最后一轮」；
+//  2. 切换到下一位玩家；
+//  3. 若处于最后一轮且回合已循环回到首位玩家，则游戏结束。
+//
+// 终局判定必须在所有出手路径上保持一致，否则以「拿宝石 / 保留卡」结束最后一轮时
+// 会漏掉回合闭环判断，导致游戏多打几轮或卡在无人推进的回合。
+func AdvanceTurn(r *domain.Room) {
+	if anyPlayerReachedTarget(r) && r.State.RoomStatus == domain.RoomStatusPlaying {
+		r.State.RoomStatus = domain.RoomStatusLastTurn
+	}
+
+	SwitchToNextPlayer(r)
+
+	if r.State.RoomStatus == domain.RoomStatusLastTurn && r.State.CurrentPlayer == r.State.FirstPlayer {
+		r.State.RoomStatus = domain.RoomStatusEnd
+	}
+}
+
+// winningScore splendor 终局分数线：任一玩家达到该分数即触发最后一轮。
+const winningScore = 15
+
+// anyPlayerReachedTarget 判断是否已有玩家达到终局分数线。
+func anyPlayerReachedTarget(r *domain.Room) bool {
+	for _, ps := range r.State.Players {
+		if ps != nil && ps.Score >= winningScore {
+			return true
+		}
+	}
+	return false
+}
+
+// isTurnPlayable 判断当前是否处于可出手状态：仅 playing / last_turn 允许玩家动作。
+// 游戏结束或尚未开局时拒绝一切出手命令，避免残留点击改动已结束的对局。
+func isTurnPlayable(r *domain.Room) bool {
+	return r.State.RoomStatus == domain.RoomStatusPlaying || r.State.RoomStatus == domain.RoomStatusLastTurn
+}
