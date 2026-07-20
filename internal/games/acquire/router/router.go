@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/roompkg"
+	"github.com/nciyuan9264/game-backend/internal/games/acquire/loadtest"
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/service"
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/ws"
 	"github.com/nciyuan9264/game-backend/pkg/auth"
@@ -61,4 +62,8 @@ func InitRouter(r *gin.Engine) {
 
 	// WebSocket 路由
 	r.GET("/ws", ws.HandleWebSocket)
+
+	if loadtest.Enabled() {
+		loadtest.RegisterRoutes(r)
+	}
 }

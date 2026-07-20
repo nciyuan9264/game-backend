@@ -5,6 +5,7 @@ import (
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/router"
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/service"
 	"github.com/nciyuan9264/game-backend/pkg/database"
+	"github.com/nciyuan9264/game-backend/pkg/debugserver"
 	"github.com/nciyuan9264/game-backend/pkg/httpserver"
 )
 
@@ -14,6 +15,7 @@ func main() {
 
 	r := httpserver.New()
 	go service.ScheduleDailyRoomReset()
+	debugserver.StartFromEnv()
 
 	router.InitRouter(r)
 
