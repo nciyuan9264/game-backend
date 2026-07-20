@@ -37,6 +37,11 @@ type metrics struct {
 	messages     atomic.Int64
 	actions      atomic.Int64
 	errors       atomic.Int64
+	readErrors   atomic.Int64
+	writeErrors  atomic.Int64
+	recvBytes    atomic.Int64
+	sentBytes    atomic.Int64
+	startedAt    time.Time
 }
 
 type loadClient struct {
@@ -59,7 +64,7 @@ func main() {
 	}
 	log.Printf("prepared %d rooms", len(rooms))
 
-	m := &metrics{}
+	m := &metrics{startedAt: time.Now()}
 	go reportMetrics(ctx, m)
 
 	if err := run(ctx, cfg, rooms, m); err != nil {
@@ -189,15 +194,21 @@ func (c *loadClient) readLoop(ctx context.Context, wg *sync.WaitGroup, active bo
 		default:
 		}
 
-		_, data, err := c.conn.ReadMessage()
+		messageType, data, err := c.conn.ReadMessage()
 		if err != nil {
 			if ctx.Err() == nil {
-				log.Printf("read failed room=%s user=%s err=%v", c.roomID, c.userID, err)
+				c.m.readErrors.Add(1)
 				c.m.errors.Add(1)
+				log.Printf("read failed room=%s user=%s close=%s err=%v",
+					c.roomID, c.userID, closeDescription(err), err)
 			}
 			return
 		}
 		c.m.messages.Add(1)
+		c.m.recvBytes.Add(int64(len(data)))
+		if messageType != websocket.TextMessage {
+			log.Printf("non-text message room=%s user=%s message_type=%d bytes=%d", c.roomID, c.userID, messageType, len(data))
+		}
 		if !active {
 			continue
 		}
@@ -226,19 +237,34 @@ func (c *loadClient) readLoop(ctx context.Context, wg *sync.WaitGroup, active bo
 			return
 		}
 		if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+			c.m.writeErrors.Add(1)
 			c.m.errors.Add(1)
+			log.Printf("write action failed room=%s user=%s bytes=%d close=%s err=%v",
+				c.roomID, c.userID, len(msg), closeDescription(err), err)
 			continue
 		}
+		c.m.sentBytes.Add(int64(len(msg)))
 		c.lastActionKey = key
 		c.m.actions.Add(1)
 	}
 }
 
 func (c *loadClient) writeJSON(v any) {
-	if err := c.conn.WriteJSON(v); err != nil {
-		log.Printf("write failed room=%s user=%s err=%v", c.roomID, c.userID, err)
+	data, err := json.Marshal(v)
+	if err != nil {
+		log.Printf("marshal write failed room=%s user=%s err=%v", c.roomID, c.userID, err)
+		c.m.writeErrors.Add(1)
 		c.m.errors.Add(1)
+		return
 	}
+	if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		log.Printf("write failed room=%s user=%s bytes=%d close=%s err=%v",
+			c.roomID, c.userID, len(data), closeDescription(err), err)
+		c.m.writeErrors.Add(1)
+		c.m.errors.Add(1)
+		return
+	}
+	c.m.sentBytes.Add(int64(len(data)))
 }
 
 func createRooms(ctx context.Context, cfg config) ([]string, error) {
@@ -286,14 +312,46 @@ func reportMetrics(ctx context.Context, m *metrics) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("final connected=%d disconnected=%d messages=%d actions=%d errors=%d",
-				m.connected.Load(), m.disconnected.Load(), m.messages.Load(), m.actions.Load(), m.errors.Load())
+			logMetrics("final", m)
 			return
 		case <-ticker.C:
-			log.Printf("connected=%d disconnected=%d messages=%d actions=%d errors=%d",
-				m.connected.Load(), m.disconnected.Load(), m.messages.Load(), m.actions.Load(), m.errors.Load())
+			logMetrics("tick", m)
 		}
 	}
+}
+
+func logMetrics(label string, m *metrics) {
+	elapsed := time.Since(m.startedAt)
+	recvBytes := m.recvBytes.Load()
+	sentBytes := m.sentBytes.Load()
+	log.Printf("%s connected=%d disconnected=%d messages=%d actions=%d errors=%d read_errors=%d write_errors=%d recv_bytes=%d sent_bytes=%d recv_mbps=%.3f sent_mbps=%.3f",
+		label,
+		m.connected.Load(),
+		m.disconnected.Load(),
+		m.messages.Load(),
+		m.actions.Load(),
+		m.errors.Load(),
+		m.readErrors.Load(),
+		m.writeErrors.Load(),
+		recvBytes,
+		sentBytes,
+		throughputMbps(recvBytes, elapsed),
+		throughputMbps(sentBytes, elapsed),
+	)
+}
+
+func throughputMbps(bytes int64, elapsed time.Duration) float64 {
+	if elapsed <= 0 {
+		return 0
+	}
+	return float64(bytes*8) / elapsed.Seconds() / 1_000_000
+}
+
+func closeDescription(err error) string {
+	if closeErr, ok := err.(*websocket.CloseError); ok {
+		return fmt.Sprintf("code=%d text=%q", closeErr.Code, closeErr.Text)
+	}
+	return "none"
 }
 
 func webSocketURL(base, roomID, userID string) string {

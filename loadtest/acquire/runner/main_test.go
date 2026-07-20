@@ -45,6 +45,15 @@ func TestUserIDForSeatMakesSeatOneTheCreatedOwner(t *testing.T) {
 	}
 }
 
+func TestThroughputMbps(t *testing.T) {
+	got := throughputMbps(250_000, time.Second)
+	want := 2.0
+
+	if got != want {
+		t.Fatalf("throughputMbps = %v, want %v", got, want)
+	}
+}
+
 func TestReadLoopExitsWhenContextCancelledWhileBlocked(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	releaseServerConn := make(chan struct{})

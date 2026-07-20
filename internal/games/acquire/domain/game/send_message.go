@@ -2,6 +2,7 @@ package game
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -14,6 +15,19 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+type syncWriteError struct {
+	Bytes int
+	Err   error
+}
+
+func (e *syncWriteError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *syncWriteError) Unwrap() error {
+	return e.Err
+}
 
 func CalculateTotalValue(playerStocks map[string]int, companyInfoMap map[string]*domain.CompanyState) int {
 	totalValue := 0
@@ -122,7 +136,10 @@ func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.Pl
 	if pc.PlayerID == room.State.CurrentPlayer {
 		WriteGameLog(room, pc.PlayerID, data)
 	}
-	return conn.WriteMessage(websocket.TextMessage, data)
+	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		return &syncWriteError{Bytes: len(data), Err: err}
+	}
+	return nil
 }
 
 func SyncMatchMessage(conn domain.WriteOnlyConn, r *domain.Room, pc *domain.PlayerConn) error {
@@ -168,11 +185,37 @@ func BroadcastToRoom(r *domain.Room) {
 		if pc.Online {
 			// 尝试发送消息
 			if err := SyncRoomMessage(pc.Conn, r, pc, result); err != nil {
-				logger.Error("广播失败，移除连接", logger.F("room_id", r.ID), logger.F("player_id", pc.PlayerID), logger.F("error", err))
+				var writeErr *syncWriteError
+				syncBytes := 0
+				if errors.As(err, &writeErr) {
+					syncBytes = writeErr.Bytes
+				}
+				logger.Error("广播失败，移除连接",
+					logger.F("room_id", r.ID),
+					logger.F("player_id", pc.PlayerID),
+					logger.F("room_status", r.State.RoomStatus),
+					logger.F("current_player", r.State.CurrentPlayer),
+					logger.F("player_online", pc.Online),
+					logger.F("player_ai", pc.AI),
+					logger.F("sync_bytes", syncBytes),
+					logger.F("total_connections", len(r.Connections)),
+					logger.F("online_connections", countOnlineConnections(r)),
+					logger.F("error", err),
+				)
 				pc.Conn.Close()
 			}
 		}
 	}
+}
+
+func countOnlineConnections(r *domain.Room) int {
+	n := 0
+	for _, pc := range r.Connections {
+		if pc.Online {
+			n++
+		}
+	}
+	return n
 }
 
 func BroadcastToMatch(r *domain.Room) {
