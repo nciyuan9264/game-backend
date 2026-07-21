@@ -180,6 +180,9 @@ func SyncMatchMessage(conn domain.WriteOnlyConn, r *domain.Room, pc *domain.Play
 // 广播消息给房间内所有连接成功的玩家
 func BroadcastToRoom(r *domain.Room) {
 	result, _ := RecomputeDerivedState(r)
+	if r.State.RoomStatus == domain.RoomStatusEnd {
+		clearThinkTimer(r)
+	}
 
 	for _, pc := range r.Connections {
 		if pc.Online {
@@ -206,6 +209,18 @@ func BroadcastToRoom(r *domain.Room) {
 			}
 		}
 	}
+}
+
+func clearThinkTimer(r *domain.Room) {
+	if r == nil || r.Base == nil {
+		return
+	}
+	if r.Base.ThinkTimer != nil {
+		r.Base.ThinkTimer.Stop()
+		r.Base.ThinkTimer = nil
+	}
+	r.Base.TurnDeadline = time.Time{}
+	r.Base.TurnTimeout = 0
 }
 
 func countOnlineConnections(r *domain.Room) int {

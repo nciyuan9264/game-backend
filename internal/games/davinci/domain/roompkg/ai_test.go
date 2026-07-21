@@ -1,7 +1,9 @@
 package roompkg
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/nciyuan9264/game-backend/internal/games/davinci/domain/domain"
 	"github.com/nciyuan9264/game-backend/pkg/roomcore"
@@ -159,5 +161,58 @@ func TestShouldGuessAgainInSetCardLowProb(t *testing.T) {
 	}}
 	if _, ok := shouldGuessAgainInSetCard(r, "me"); ok {
 		t.Fatalf("expected fall back to set card when next prob is low")
+	}
+}
+
+func TestMaybeRunAIIfNeededStopsIfRoomEndsDuringThinkDelay(t *testing.T) {
+	r := newTestRoom()
+	r.State.RoomStatus = domain.RoomStatusGetCard
+	r.State.CurrentPlayer = "ai_001"
+	r.State.BoardCards["W0"] = &domain.Card{ID: "W0", Num: domain.Num1, Color: domain.ColorWhite, Index: -1}
+	r.State.Players["ai_001"] = &domain.PlayerState{Cards: []*domain.Card{}}
+	r.Connections["ai_001"] = &roomcore.PlayerConn{
+		PlayerID: "ai_001",
+		Online:   true,
+		Ready:    true,
+		AI:       true,
+	}
+
+	oldDelay := aiThinkDelay
+	delayCalled := make(chan struct{})
+	aiThinkDelay = func() time.Duration {
+		r.State.RoomStatus = domain.RoomStatusEnd
+		close(delayCalled)
+		return 0
+	}
+	defer func() {
+		aiThinkDelay = oldDelay
+	}()
+
+	msg := map[string]interface{}{
+		"playerId": "ai_001",
+		"roomData": map[string]interface{}{
+			"currentPlayer": "ai_001",
+			"gameStatus":    string(domain.RoomStatusGetCard),
+		},
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal message: %v", err)
+	}
+
+	if !MaybeRunAIIfNeeded(r, data) {
+		t.Fatalf("MaybeRunAIIfNeeded returned false before room ended")
+	}
+
+	select {
+	case <-delayCalled:
+	case <-time.After(time.Second):
+		t.Fatalf("AI delay was not reached")
+	}
+
+	select {
+	case cmd := <-r.CmdCh:
+		t.Fatalf("unexpected command after room ended during AI delay: %+v", cmd)
+	case <-time.After(50 * time.Millisecond):
 	}
 }

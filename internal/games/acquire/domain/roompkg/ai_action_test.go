@@ -127,3 +127,39 @@ func TestEnumerateActionsIncludesAffordableStockCombinations(t *testing.T) {
 		}
 	}
 }
+
+func TestMaybeRunAIIfNeededIgnoresEndedRoom(t *testing.T) {
+	r := newAITestRoom()
+	r.State.RoomStatus = domain.RoomStatusEnd
+	r.State.CurrentPlayer = "ai_001"
+
+	msg := map[string]interface{}{
+		"type":     "ROOM_SYNC",
+		"playerId": "ai_001",
+		"roomData": map[string]interface{}{
+			"currentPlayer": "ai_001",
+			"gameStatus":    string(domain.RoomStatusEnd),
+		},
+		"tempData": map[string]interface{}{},
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal message: %v", err)
+	}
+
+	if MaybeRunAIIfNeeded(r, data) {
+		t.Fatalf("MaybeRunAIIfNeeded returned true for ended room")
+	}
+	if r.AIRunning {
+		t.Fatalf("AIRunning = true, want false")
+	}
+}
+
+func TestBuildTurnTimeoutCommandIgnoresEndedRoom(t *testing.T) {
+	r := newAITestRoom()
+	r.State.RoomStatus = domain.RoomStatusEnd
+
+	if cmd, ok := BuildTurnTimeoutCommand(r, "ai_001"); ok {
+		t.Fatalf("BuildTurnTimeoutCommand returned command for ended room: %+v", cmd)
+	}
+}

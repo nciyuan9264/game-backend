@@ -939,6 +939,9 @@ func anyActiveCompany(r *domain.Room) string {
 // BuildTurnTimeoutCommand 思考超时时由 roomcore 调用。
 // 与 MaybeRunAIIfNeeded 共用 buildAIActionMsg，但 PlayerID 用真实玩家 ID，且不修改身份。
 func BuildTurnTimeoutCommand(r *domain.Room, playerID string) (roomcore.Command, bool) {
+	if r == nil || r.State == nil || r.State.RoomStatus == domain.RoomStatusEnd {
+		return roomcore.Command{}, false
+	}
 	cmdType, payload, ok := buildAIActionMsg(r, playerID, r.State.RoomStatus, nil)
 	if !ok {
 		// 兜底：发出 turn_timeout 强制切人，避免房间永久卡死。
@@ -980,6 +983,9 @@ func MaybeRunAIIfNeeded(r *domain.Room, message []byte) bool {
 		return false
 	}
 	gameStatus := domain.RoomStatus(gameStatusStr)
+	if gameStatus == domain.RoomStatusEnd {
+		return false
+	}
 
 	playerId, ok := msg["playerId"].(string)
 	if !ok || playerId == "" || (playerId != currentPlayerID && gameStatus != domain.RoomStatusMergingSettle) {
@@ -1067,6 +1073,9 @@ func MaybeRunAIIfNeeded(r *domain.Room, message []byte) bool {
 			r.AIRunning = false
 		}()
 		time.Sleep(5 * time.Second)
+		if r.State == nil || r.State.RoomStatus == domain.RoomStatusEnd {
+			return
+		}
 
 		cmdType, payload, ok := buildAIActionMsg(r, playerId, gameStatus, mainCompany)
 		if !ok {

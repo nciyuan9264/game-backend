@@ -18,6 +18,10 @@ type VirtualConn struct {
 	Room *domain.Room
 }
 
+var aiThinkDelay = func() time.Duration {
+	return time.Duration(2000+rand.Intn(2001)) * time.Millisecond
+}
+
 // WriteMessage 实现ConnInterface接口
 func (v *VirtualConn) WriteMessage(messageType int, data []byte) error {
 	MaybeRunAIIfNeeded(v.Room, data)
@@ -593,7 +597,10 @@ func MaybeRunAIIfNeeded(r *domain.Room, message []byte) bool {
 			r.AIRunning = false
 		}()
 		// 随机思考 2~4 秒，让 AI 行为更自然
-		time.Sleep(time.Duration(2000+rand.Intn(2001)) * time.Millisecond)
+		time.Sleep(aiThinkDelay())
+		if r.State == nil || r.State.RoomStatus == domain.RoomStatusEnd {
+			return
+		}
 
 		cmdType, payload, ok := buildAIActionMsg(r, currentPlayerID, gameStatus)
 		if !ok {
