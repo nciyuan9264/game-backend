@@ -17,6 +17,9 @@ type RoomService struct {
 	Room *domain.Room
 	svc  *roomcore.Service[*RoomService]
 
+	snapshotCh       chan snapshotRequest
+	statusSnapshotCh chan statusSnapshotRequest
+
 	HistoryStartedAt time.Time
 	HistoryEnded     bool
 }
@@ -41,6 +44,10 @@ func (r *RoomService) Run() {
 					r.finishHistory()
 				}
 			}
+		case req := <-r.snapshotCh:
+			req.reply <- r.buildSnapshot()
+		case req := <-r.statusSnapshotCh:
+			req.reply <- r.buildStatusSnapshot()
 		case <-r.Room.Base.HealthTickChan():
 			roomcore.HandleHealthTick(r.svc)
 		case <-r.Room.QuitCh:

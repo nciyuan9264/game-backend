@@ -17,6 +17,9 @@ type RoomService struct {
 	Room *domain.Room
 	svc  *roomcore.Service[*RoomService]
 
+	snapshotCh       chan snapshotRequest
+	statusSnapshotCh chan statusSnapshotRequest
+
 	// History recording fields.
 	Recorder         *gamehistory.Recorder
 	HistorySeq       int
@@ -57,6 +60,10 @@ func (r *RoomService) Run() {
 					r.finishRecording()
 				}
 			}
+		case req := <-r.snapshotCh:
+			req.reply <- r.buildSnapshot()
+		case req := <-r.statusSnapshotCh:
+			req.reply <- r.buildStatusSnapshot()
 		case <-r.Room.Base.HealthTickChan():
 			roomcore.HandleHealthTick(r.svc)
 		case <-r.Room.QuitCh:

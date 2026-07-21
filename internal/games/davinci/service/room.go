@@ -1,6 +1,10 @@
 package service
 
 import (
+	"context"
+	"fmt"
+	"time"
+
 	"github.com/nciyuan9264/game-backend/internal/games/davinci/domain/roompkg"
 	"github.com/nciyuan9264/game-backend/pkg/logger"
 	"github.com/nciyuan9264/game-backend/pkg/roomctl"
@@ -8,12 +12,16 @@ import (
 	"github.com/nciyuan9264/game-backend/pkg/timeutil"
 )
 
+const roomSnapshotTimeout = time.Second
+
 func CreateRoom(userID string) (string, error) {
-	owned := roomctl.CountOwnedRooms(
-		roompkg.Rooms.Snapshot(),
-		func(rs *roompkg.RoomService) string { return rs.Room.State.OwnerID },
-		userID,
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), roomSnapshotTimeout)
+	defer cancel()
+
+	owned, err := countOwnedRooms(ctx, userID)
+	if err != nil {
+		return "", err
+	}
 	if owned >= roomctl.MaxOwnedRooms {
 		logger.Warn("玩家房间数已达上限",
 			logger.F("userID", userID),
@@ -35,12 +43,34 @@ func CreateRoom(userID string) (string, error) {
 	return room_id, nil
 }
 
+func countOwnedRooms(ctx context.Context, userID string) (int, error) {
+	owned := 0
+	for roomID, rs := range roompkg.Rooms.Snapshot() {
+		snapshot, err := rs.Snapshot(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("snapshot room %s: %w", roomID, err)
+		}
+		if snapshot.OwnerID == userID {
+			owned++
+		}
+	}
+	return owned, nil
+}
+
 func GetRoomList() ([]dto.RoomInfo, error) {
 	var rooms []dto.RoomInfo
+	ctx, cancel := context.WithTimeout(context.Background(), roomSnapshotTimeout)
+	defer cancel()
+
 	roomConnInfos := roompkg.Rooms.Snapshot()
 	for roomID, roomConnInfo := range roomConnInfos {
-		roomPlayers := make([]dto.RoomPlayer, 0, len(roomConnInfo.Room.Connections))
-		for _, player := range roomConnInfo.Room.Connections {
+		snapshot, err := roomConnInfo.Snapshot(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("snapshot room %s: %w", roomID, err)
+		}
+
+		roomPlayers := make([]dto.RoomPlayer, 0, len(snapshot.Players))
+		for _, player := range snapshot.Players {
 			roomPlayers = append(roomPlayers, dto.RoomPlayer{
 				PlayerID: player.PlayerID,
 				Online:   player.Online,
@@ -50,11 +80,11 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 		}
 
 		room := dto.RoomInfo{
-			RoomID:         roomID,
-			OwnerID:        roomConnInfo.Room.State.OwnerID,
-			Status:         string(roomConnInfo.Room.State.RoomStatus),
+			RoomID:         snapshot.RoomID,
+			OwnerID:        snapshot.OwnerID,
+			Status:         snapshot.Status,
 			RoomPlayer:     roomPlayers,
-			BoardCardCount: len(roomConnInfo.Room.State.BoardCards),
+			BoardCardCount: snapshot.BoardCardCount,
 		}
 		rooms = append(rooms, room)
 	}
@@ -62,11 +92,21 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 	return rooms, nil
 }
 
-func GetGameStatus(roomID string) *roompkg.RoomService {
+func GetGameStatus(roomID string) *roompkg.RoomStatusSnapshot {
 	roomConnInfo, exists := roompkg.Rooms.Get(roomID)
 	if !exists {
 		logger.Error("房间不存在", logger.F("room_id", roomID))
+		return nil
 	}
 
-	return roomConnInfo
+	ctx, cancel := context.WithTimeout(context.Background(), roomSnapshotTimeout)
+	defer cancel()
+
+	snapshot, err := roomConnInfo.StatusSnapshot(ctx)
+	if err != nil {
+		logger.Error("获取房间状态快照失败", logger.F("room_id", roomID), logger.F("error", err))
+		return nil
+	}
+
+	return &snapshot
 }

@@ -38,7 +38,11 @@ func NewRoomService(roomID, ownerID string) *RoomService {
 		},
 	}
 
-	rs := &RoomService{Room: r}
+	rs := &RoomService{
+		Room:             r,
+		snapshotCh:       make(chan snapshotRequest),
+		statusSnapshotCh: make(chan statusSnapshotRequest),
+	}
 	rs.svc = &roomcore.Service[*RoomService]{
 		Base: base,
 		Game: rs,

@@ -1,21 +1,24 @@
 package loadtest
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/roompkg"
 )
 
 const (
-	loadtestEnabledEnv  = "ACQUIRE_LOADTEST_ENABLED"
-	loadtestTokenEnv    = "ACQUIRE_LOADTEST_TOKEN"
-	loadtestTokenHeader = "X-Loadtest-Token"
-	maxCreateRooms      = 500
+	loadtestEnabledEnv   = "ACQUIRE_LOADTEST_ENABLED"
+	loadtestTokenEnv     = "ACQUIRE_LOADTEST_TOKEN"
+	loadtestTokenHeader  = "X-Loadtest-Token"
+	maxCreateRooms       = 500
+	statsSnapshotTimeout = time.Second
 )
 
 type createRoomsRequest struct {
@@ -113,13 +116,21 @@ func stats(c *gin.Context) {
 	connections := 0
 	onlineHumans := 0
 	aiPlayers := 0
+	snapshotErrors := 0
+	ctx, cancel := context.WithTimeout(c.Request.Context(), statsSnapshotTimeout)
+	defer cancel()
 
 	for _, rs := range snapshot {
-		if rs == nil || rs.Room == nil || rs.Room.State == nil {
+		if rs == nil {
 			continue
 		}
-		roomStatus[string(rs.Room.State.RoomStatus)]++
-		for _, pc := range rs.Room.Connections {
+		roomSnapshot, err := rs.Snapshot(ctx)
+		if err != nil {
+			snapshotErrors++
+			continue
+		}
+		roomStatus[roomSnapshot.Status]++
+		for _, pc := range roomSnapshot.Players {
 			connections++
 			if pc.AI {
 				aiPlayers++
@@ -134,11 +145,12 @@ func stats(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status_code": http.StatusOK,
 		"data": gin.H{
-			"rooms":        len(snapshot),
-			"connections":  connections,
-			"onlineHumans": onlineHumans,
-			"aiPlayers":    aiPlayers,
-			"roomStatus":   roomStatus,
+			"rooms":          len(snapshot),
+			"connections":    connections,
+			"onlineHumans":   onlineHumans,
+			"aiPlayers":      aiPlayers,
+			"snapshotErrors": snapshotErrors,
+			"roomStatus":     roomStatus,
 			"runtime": gin.H{
 				"goroutines":     runtime.NumGoroutine(),
 				"heapAllocBytes": mem.HeapAlloc,
