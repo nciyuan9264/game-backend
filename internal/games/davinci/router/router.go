@@ -1,8 +1,6 @@
 package router
 
 import (
-	"os"
-
 	"github.com/gin-gonic/gin"
 	"github.com/nciyuan9264/game-backend/internal/games/davinci/domain/roompkg"
 	"github.com/nciyuan9264/game-backend/internal/games/davinci/service"
@@ -13,10 +11,7 @@ import (
 )
 
 func InitRouter(r *gin.Engine) {
-	authCenterURL := os.Getenv("AUTH_CENTER_URL")
-	if authCenterURL == "" {
-		authCenterURL = "https://api.gamebus.online/auth"
-	}
+	authCenterURL := auth.CenterURL()
 
 	api := r.Group("/room")
 	api.Use(auth.JWTMiddlewareViaAuthCenter(authCenterURL)) // 统一鉴权

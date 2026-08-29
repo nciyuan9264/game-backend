@@ -35,6 +35,7 @@ jobs:
               - 'go.sum'
               - 'deployments/Dockerfile'
               - 'docker-compose.yml'
+              - 'docker-compose.prod.yml'
               - '.github/workflows/deploy.yml'
             davinci:
               - 'internal/games/davinci/**'
@@ -131,6 +132,18 @@ jobs:
     if: ${{ needs.changes.outputs.any == 'true' }}
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Upload production Compose file
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: docker-compose.prod.yml
+          target: /home/game-backend
+
       # SSH 到服务器，只拉取/重建发生变更的游戏服务。
       # docker compose pull/up 只对指定 service 生效，未变更的服务不受影响。
       - name: Execute remote ssh commands
@@ -147,9 +160,9 @@ jobs:
             [ "${{ needs.changes.outputs.splendor }}" = "true" ] && services="$services splendor"
             echo "本次部署服务:${services}"
             echo "Pulling latest images..."
-            docker compose pull $services
+            docker compose -f docker-compose.prod.yml pull $services
             echo "Recreating services..."
-            docker compose up -d $services
+            docker compose -f docker-compose.prod.yml up -d --no-deps $services
             echo "Cleanup old images..."
             docker image prune -f
 

@@ -8,6 +8,7 @@ services:
         GAME: acquire
     environment:
       - POSTGRES_DSN=${POSTGRES_DSN}
+      - AUTH_CENTER_URL=${AUTH_CENTER_URL:-http://pam-gateway:8080/pam-api/platform/auth}
       - ACQUIRE_LOADTEST_ENABLED=${ACQUIRE_LOADTEST_ENABLED:-true}
       - ACQUIRE_LOADTEST_TOKEN=${ACQUIRE_LOADTEST_TOKEN:-local-test-token}
       - ACQUIRE_DEBUG_ADDR=${ACQUIRE_DEBUG_ADDR:-}
@@ -28,6 +29,7 @@ services:
         GAME: davinci
     environment:
       - POSTGRES_DSN=${POSTGRES_DSN}
+      - AUTH_CENTER_URL=${AUTH_CENTER_URL:-http://pam-gateway:8080/pam-api/platform/auth}
     volumes:
       - /var/log/davinci:/app/game_logs
     networks:
@@ -45,6 +47,7 @@ services:
         GAME: splendor
     environment:
       - POSTGRES_DSN=${POSTGRES_DSN}
+      - AUTH_CENTER_URL=${AUTH_CENTER_URL:-http://pam-gateway:8080/pam-api/platform/auth}
     volumes:
       - /var/log/splendor:/app/game_logs
     networks:
