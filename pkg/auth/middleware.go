@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strconv"
@@ -13,6 +15,7 @@ import (
 )
 
 const defaultAuthCenterURL = "https://api.gamebus.online/pam-api/platform/auth"
+const clientClosedRequestStatus = 499
 
 var authHTTPClient = &http.Client{Timeout: 5 * time.Second}
 
@@ -66,6 +69,11 @@ func JWTMiddlewareViaAuthCenter(authCenterURL string) gin.HandlerFunc {
 
 		resp, err := authHTTPClient.Do(req)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				logger.Warn("[AUTH] auth request canceled", logger.F("method", method), logger.F("path", path), logger.F("error", err.Error()))
+				c.AbortWithStatus(clientClosedRequestStatus)
+				return
+			}
 			logger.Error("[AUTH] auth center request failed", logger.F("error", err.Error()))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "auth server connection error"})
 			return

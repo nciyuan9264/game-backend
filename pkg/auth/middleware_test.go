@@ -1,12 +1,19 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
 
 func TestCenterURL(t *testing.T) {
 	t.Setenv("AUTH_CENTER_URL", "")
@@ -89,6 +96,33 @@ func TestJWTMiddlewareRejectsInvalidPAMGatewayResponse(t *testing.T) {
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d body = %s", res.Code, res.Body.String())
+	}
+}
+
+func TestJWTMiddlewareTreatsCanceledAuthRequestAsClientClosed(t *testing.T) {
+	previousClient := authHTTPClient
+	authHTTPClient = &http.Client{
+		Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			return nil, context.Canceled
+		}),
+	}
+	t.Cleanup(func() {
+		authHTTPClient = previousClient
+	})
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/protected", JWTMiddlewareViaAuthCenter("https://example.com/pam-api/platform/auth"), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.AddCookie(&http.Cookie{Name: "access_token", Value: "access-token"})
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != clientClosedRequestStatus {
 		t.Fatalf("status = %d body = %s", res.Code, res.Body.String())
 	}
 }
