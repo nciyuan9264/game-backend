@@ -96,6 +96,13 @@ func TestRoomServiceStatusSnapshotDeepCopiesRoomState(t *testing.T) {
 			Dividends: map[string]int{"owner-1": 1000},
 		},
 	}
+	rs.Room.State.EndGame = domain.EndGameState{
+		Eligible:  true,
+		Condition: "company_size",
+		Company:   "Tower",
+		TileCount: 41,
+		Votes:     map[string]bool{"owner-1": false},
+	}
 
 	go rs.Run()
 	defer close(rs.Room.QuitCh)
@@ -118,6 +125,7 @@ func TestRoomServiceStatusSnapshotDeepCopiesRoomState(t *testing.T) {
 	settle.Hoders[0] = "mutated-holder"
 	settle.Dividends["owner-1"] = 1
 	status.Room.State.MergeSettleData["Tower"] = settle
+	status.Room.State.EndGame.Votes["owner-1"] = true
 	status.Room.Connections["owner-1"].Online = false
 
 	fresh, err := rs.StatusSnapshot(ctx)
@@ -147,6 +155,9 @@ func TestRoomServiceStatusSnapshotDeepCopiesRoomState(t *testing.T) {
 	}
 	if fresh.Room.State.MergeSettleData["Tower"].Dividends["owner-1"] != 1000 {
 		t.Fatalf("dividend = %d, want 1000", fresh.Room.State.MergeSettleData["Tower"].Dividends["owner-1"])
+	}
+	if fresh.Room.State.EndGame.Votes["owner-1"] {
+		t.Fatal("end game vote was not deep copied")
 	}
 	if !fresh.Room.Connections["owner-1"].Online {
 		t.Fatal("connection online = false, want true")

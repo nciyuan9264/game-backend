@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/nciyuan9264/game-backend/internal/games/davinci/domain/domain"
@@ -19,7 +21,30 @@ type VirtualConn struct {
 }
 
 var aiThinkDelay = func() time.Duration {
-	return time.Duration(2000+rand.Intn(2001)) * time.Millisecond
+	minMs := envInt("DAVINCI_AI_THINK_DELAY_MIN_MS", 2000)
+	maxMs := envInt("DAVINCI_AI_THINK_DELAY_MAX_MS", 4000)
+	if minMs < 0 {
+		minMs = 0
+	}
+	if maxMs < minMs {
+		maxMs = minMs
+	}
+	if maxMs == minMs {
+		return time.Duration(minMs) * time.Millisecond
+	}
+	return time.Duration(minMs+rand.Intn(maxMs-minMs+1)) * time.Millisecond
+}
+
+func envInt(key string, fallback int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
 }
 
 // WriteMessage 实现ConnInterface接口
@@ -591,13 +616,18 @@ func MaybeRunAIIfNeeded(r *domain.Room, message []byte) bool {
 	}
 
 	r.AIRunning = true
+	delay := aiThinkDelay()
+	logger.Info("AI 思考延迟已调度",
+		logger.F("room_id", r.ID),
+		logger.F("player_id", currentPlayerID),
+		logger.F("game_status", gameStatus),
+		logger.F("delay_ms", delay.Milliseconds()))
 
 	go func() {
 		defer func() {
 			r.AIRunning = false
 		}()
-		// 随机思考 2~4 秒，让 AI 行为更自然
-		time.Sleep(aiThinkDelay())
+		time.Sleep(delay)
 		if r.State == nil || r.State.RoomStatus == domain.RoomStatusEnd {
 			return
 		}
@@ -617,6 +647,12 @@ func MaybeRunAIIfNeeded(r *domain.Room, message []byte) bool {
 			return
 		}
 
+		logger.Info("AI 投递动作",
+			logger.F("room_id", r.ID),
+			logger.F("player_id", currentPlayerID),
+			logger.F("game_status", gameStatus),
+			logger.F("command_type", cmdType),
+			logger.F("delay_ms", delay.Milliseconds()))
 		r.CmdCh <- domain.Command{
 			Type:     cmdType,
 			PlayerID: playerId,

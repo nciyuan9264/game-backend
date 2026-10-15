@@ -113,6 +113,12 @@ func MarkPlayerOffline[R any](s *Service[R], playerID string) {
 
 // HandleDisconnect 玩家断开连接命令。
 func HandleDisconnect[R any](s *Service[R], cmd Command) {
+	if cmd.Conn != nil {
+		pc := s.Base.Connections[cmd.PlayerID]
+		if pc == nil || pc.Conn != cmd.Conn {
+			return
+		}
+	}
 	MarkPlayerOffline(s, cmd.PlayerID)
 }
 
@@ -125,6 +131,21 @@ func roomPlayerCount[R any](s *Service[R]) int {
 		}
 	}
 	return onlineCount
+}
+
+func firstAvailableSeat(base *Base, maxPlayers int) int {
+	occupied := make(map[int]bool, len(base.Connections))
+	for _, player := range base.Connections {
+		if player != nil && player.SeatIndex >= 0 && player.SeatIndex < maxPlayers {
+			occupied[player.SeatIndex] = true
+		}
+	}
+	for index := 0; index < maxPlayers; index++ {
+		if !occupied[index] {
+			return index
+		}
+	}
+	return -1
 }
 
 // HandleConnect 处理玩家加入命令。
@@ -141,6 +162,8 @@ func HandleConnect[R any](s *Service[R], cmd Command) {
 			}
 			p.Conn = conn
 			p.Online = true
+			p.Name = cmd.Name
+			p.Avatar = cmd.Avatar
 
 			s.Logger.Info("玩家重连成功", "room_id", s.Base.ID, "player_id", playerID)
 			return
@@ -168,11 +191,14 @@ func HandleConnect[R any](s *Service[R], cmd Command) {
 	}
 
 	s.Base.Connections[playerID] = &PlayerConn{
-		PlayerID: playerID,
-		Conn:     conn,
-		Online:   true,
-		Ready:    s.GetOwner(s.Game) == playerID,
-		AI:       false,
+		PlayerID:  playerID,
+		Conn:      conn,
+		Online:    true,
+		Ready:     s.GetOwner(s.Game) == playerID,
+		AI:        false,
+		SeatIndex: firstAvailableSeat(s.Base, s.GetMaxPlayers(s.Game)),
+		Name:      cmd.Name,
+		Avatar:    cmd.Avatar,
 	}
 	s.Base.PlayerSeq = append(s.Base.PlayerSeq, playerID)
 
@@ -202,14 +228,15 @@ func HandleMatchReady[R any](s *Service[R], cmd Command) {
 	}
 }
 
-// JoinMatchAsAI 把一个 AI 玩家加入到当前匹配中。
-func JoinMatchAsAI[R any](s *Service[R], playerID string) bool {
+// JoinMatchAsAI 把一个 AI 玩家加入到当前匹配中的指定席位。
+func JoinMatchAsAI[R any](s *Service[R], playerID string, seatIndex int) bool {
 	s.Base.Connections[playerID] = &PlayerConn{
-		PlayerID: playerID,
-		Conn:     s.NewVirtualConn(s.Game),
-		Online:   true,
-		Ready:    true,
-		AI:       true,
+		PlayerID:  playerID,
+		Conn:      s.NewVirtualConn(s.Game),
+		Online:    true,
+		Ready:     true,
+		AI:        true,
+		SeatIndex: seatIndex,
 	}
 	s.Base.PlayerSeq = append(s.Base.PlayerSeq, playerID)
 
@@ -260,7 +287,33 @@ func HandleAddAI[R any](s *Service[R], cmd Command) {
 		return
 	}
 
-	JoinMatchAsAI(s, s.GenAIPlayerID(s.Game))
+	var payload struct {
+		SeatIndex *int `json:"seatIndex"`
+	}
+	if len(cmd.Payload) > 0 {
+		if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
+			s.Logger.Error("无效的 payload",
+				"room_id", s.Base.ID, "player_id", cmd.PlayerID, "error", err)
+			writeCommandError(s, cmd, "席位无效")
+			return
+		}
+	}
+	seatIndex := firstAvailableSeat(s.Base, s.GetMaxPlayers(s.Game))
+	if payload.SeatIndex != nil {
+		seatIndex = *payload.SeatIndex
+		for _, player := range s.Base.Connections {
+			if player != nil && player.SeatIndex == seatIndex {
+				writeCommandError(s, cmd, "该席位已被占用")
+				return
+			}
+		}
+	}
+	if seatIndex < 0 || seatIndex >= s.GetMaxPlayers(s.Game) {
+		writeCommandError(s, cmd, "席位无效")
+		return
+	}
+
+	JoinMatchAsAI(s, s.GenAIPlayerID(s.Game), seatIndex)
 }
 
 // removePlayerPayload match_remove_player 命令的 payload。

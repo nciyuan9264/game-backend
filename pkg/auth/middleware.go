@@ -20,22 +20,29 @@ const clientClosedRequestStatus = 499
 var authHTTPClient = &http.Client{Timeout: 5 * time.Second}
 
 type AuthCenterUser struct {
-	UserID string `json:"user_id"`
-	Email  string `json:"email"`
-	Avatar string `json:"avatar"`
-	Name   string `json:"name"`
+	UserID string   `json:"user_id"`
+	Email  string   `json:"email"`
+	Avatar string   `json:"avatar"`
+	Name   string   `json:"name"`
+	Roles  []string `json:"roles"`
 }
 
-type AuthCenterResponse struct {
-	Valid bool            `json:"valid"`
-	User  *AuthCenterUser `json:"user"`
+type AuthCenterPrincipal struct {
+	UserID string   `json:"user_id"`
+	Roles  []string `json:"roles"`
 }
 
 // 封装后的认证中心返回结构
-type AuthCenterWrappedResponse struct {
-	StatusCode int                `json:"status_code"`
-	Message    string             `json:"message"`
-	Data       AuthCenterResponse `json:"data"`
+type AuthCenterVerifyResponse struct {
+	StatusCode int                  `json:"status_code"`
+	Message    string               `json:"message"`
+	Data       *AuthCenterPrincipal `json:"data"`
+}
+
+type AuthCenterProfileResponse struct {
+	StatusCode int             `json:"status_code"`
+	Message    string          `json:"message"`
+	Data       *AuthCenterUser `json:"data"`
 }
 
 func CenterURL() string {
@@ -86,7 +93,7 @@ func JWTMiddlewareViaAuthCenter(authCenterURL string) gin.HandlerFunc {
 			return
 		}
 
-		var wrapped AuthCenterWrappedResponse
+		var wrapped AuthCenterVerifyResponse
 		if err := json.NewDecoder(resp.Body).Decode(&wrapped); err != nil {
 			logger.Error("[AUTH] parse auth response failed", logger.F("error", err.Error()))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "failed to parse auth response"})
@@ -98,12 +105,12 @@ func JWTMiddlewareViaAuthCenter(authCenterURL string) gin.HandlerFunc {
 			return
 		}
 
-		if !wrapped.Data.Valid || wrapped.Data.User == nil {
-			logger.Error("[AUTH] invalid auth response", logger.F("reason", "token is invalid or user is missing"))
+		if wrapped.Data == nil {
+			logger.Error("[AUTH] invalid auth response", logger.F("reason", "user is missing"))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "invalid auth response"})
 			return
 		}
-		userID, parseErr := strconv.ParseUint(wrapped.Data.User.UserID, 10, strconv.IntSize)
+		userID, parseErr := strconv.ParseUint(wrapped.Data.UserID, 10, strconv.IntSize)
 		if parseErr != nil || userID == 0 {
 			logger.Error("[AUTH] invalid auth user", logger.F("reason", "invalid user id"))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "invalid user id"})
@@ -113,9 +120,81 @@ func JWTMiddlewareViaAuthCenter(authCenterURL string) gin.HandlerFunc {
 		// 保存用户信息到上下文
 		logger.Info("[AUTH] verify success", logger.F("user_id", userID))
 		c.Set("user_id", uint(userID))
-		c.Set("email", wrapped.Data.User.Email)
-		c.Set("avatar", wrapped.Data.User.Avatar)
-		c.Set("name", wrapped.Data.User.Name)
+		c.Set("roles", append([]string(nil), wrapped.Data.Roles...))
+		c.Next()
+	}
+}
+
+func AuthProfileMiddlewareViaAuthCenter(authCenterURL string) gin.HandlerFunc {
+	authCenterURL = strings.TrimRight(strings.TrimSpace(authCenterURL), "/")
+	return func(c *gin.Context) {
+		method := c.Request.Method
+		path := c.Request.URL.Path
+		logger.Info("[AUTH] profile request", logger.F("method", method), logger.F("path", path))
+
+		token, err := c.Cookie("access_token")
+		if err != nil || token == "" {
+			logger.Warn("[AUTH] missing token", logger.F("method", method), logger.F("path", path), logger.F("reason", "access_token cookie is empty"))
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing token", "details": "access_token cookie is empty"})
+			return
+		}
+
+		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, authCenterURL+"/profile", nil)
+		if err != nil {
+			logger.Error("[AUTH] create profile request failed", logger.F("error", err.Error()))
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "failed to create profile request"})
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		resp, err := authHTTPClient.Do(req)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				logger.Warn("[AUTH] profile request canceled", logger.F("method", method), logger.F("path", path), logger.F("error", err.Error()))
+				c.AbortWithStatus(clientClosedRequestStatus)
+				return
+			}
+			logger.Error("[AUTH] auth center profile failed", logger.F("error", err.Error()))
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "auth server connection error"})
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			logger.Error("[AUTH] auth center rejected profile request", logger.F("status_code", resp.StatusCode))
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "auth server rejected token"})
+			return
+		}
+
+		var wrapped AuthCenterProfileResponse
+		if err := json.NewDecoder(resp.Body).Decode(&wrapped); err != nil {
+			logger.Error("[AUTH] parse profile response failed", logger.F("error", err.Error()))
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "failed to parse auth response"})
+			return
+		}
+		if wrapped.StatusCode != http.StatusOK {
+			logger.Error("[AUTH] auth center rejected token", logger.F("status_code", wrapped.StatusCode), logger.F("message", wrapped.Message))
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": wrapped.Message})
+			return
+		}
+		if wrapped.Data == nil {
+			logger.Error("[AUTH] invalid profile response", logger.F("reason", "user is missing"))
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "invalid auth response"})
+			return
+		}
+		userID, parseErr := strconv.ParseUint(wrapped.Data.UserID, 10, strconv.IntSize)
+		if parseErr != nil || userID == 0 {
+			logger.Error("[AUTH] invalid auth user", logger.F("reason", "invalid user id"))
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "invalid user id"})
+			return
+		}
+
+		logger.Info("[AUTH] profile success", logger.F("user_id", userID))
+		c.Set("user_id", uint(userID))
+		c.Set("roles", append([]string(nil), wrapped.Data.Roles...))
+		c.Set("email", wrapped.Data.Email)
+		c.Set("avatar", wrapped.Data.Avatar)
+		c.Set("name", wrapped.Data.Name)
 		c.Next()
 	}
 }

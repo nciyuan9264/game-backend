@@ -15,10 +15,13 @@ var ErrRoomSnapshotUnavailable = errors.New("room snapshot unavailable")
 
 // RoomSnapshotPlayer is the copy-safe player view returned by a room actor.
 type RoomSnapshotPlayer struct {
-	PlayerID string
-	Online   bool
-	AI       bool
-	Ready    bool
+	PlayerID  string
+	Online    bool
+	AI        bool
+	Ready     bool
+	SeatIndex int
+	Name      string
+	Avatar    string
 }
 
 // RoomSnapshot is the copy-safe list view returned by a room actor.
@@ -28,6 +31,11 @@ type RoomSnapshot struct {
 	Status         string
 	Players        []RoomSnapshotPlayer
 	EmptyTileCount int
+	Visibility     string
+	MaxPlayers     int
+	PlayerOrder    []string
+	OwnerName      string
+	OwnerAvatar    string
 }
 
 // RoomStatusSnapshot is a copy-safe full room status view for /room/game_status.
@@ -103,14 +111,19 @@ func (r *RoomService) StatusSnapshot(ctx context.Context) (RoomStatusSnapshot, e
 func (r *RoomService) buildSnapshot() RoomSnapshot {
 	room := r.Room
 	snapshot := RoomSnapshot{
-		RoomID:  room.ID,
-		Players: make([]RoomSnapshotPlayer, 0, len(room.Connections)),
+		RoomID:      room.ID,
+		Players:     make([]RoomSnapshotPlayer, 0, len(room.Connections)),
+		PlayerOrder: append([]string(nil), room.PlayerSeq...),
 	}
 
 	if room.State != nil {
 		snapshot.OwnerID = room.State.OwnerID
 		snapshot.Status = string(room.State.RoomStatus)
 		snapshot.EmptyTileCount = countEmptyTiles(room.State.BoardTiles)
+		snapshot.Visibility = room.State.Visibility
+		snapshot.MaxPlayers = MaxPlayers
+		snapshot.OwnerName = room.State.OwnerName
+		snapshot.OwnerAvatar = room.State.OwnerAvatar
 	}
 
 	for _, player := range room.Connections {
@@ -118,10 +131,13 @@ func (r *RoomService) buildSnapshot() RoomSnapshot {
 			continue
 		}
 		snapshot.Players = append(snapshot.Players, RoomSnapshotPlayer{
-			PlayerID: player.PlayerID,
-			Online:   player.Online,
-			AI:       player.AI,
-			Ready:    player.Ready,
+			PlayerID:  player.PlayerID,
+			Online:    player.Online,
+			AI:        player.AI,
+			Ready:     player.Ready,
+			SeatIndex: player.SeatIndex,
+			Name:      player.Name,
+			Avatar:    player.Avatar,
 		})
 	}
 	sort.Slice(snapshot.Players, func(i, j int) bool {
@@ -171,10 +187,13 @@ func cloneBase(base *roomcore.Base) *roomcore.Base {
 			continue
 		}
 		connections[playerID] = &roomcore.PlayerConn{
-			PlayerID: pc.PlayerID,
-			Online:   pc.Online,
-			Ready:    pc.Ready,
-			AI:       pc.AI,
+			PlayerID:  pc.PlayerID,
+			Online:    pc.Online,
+			Ready:     pc.Ready,
+			AI:        pc.AI,
+			SeatIndex: pc.SeatIndex,
+			Name:      pc.Name,
+			Avatar:    pc.Avatar,
 		}
 	}
 

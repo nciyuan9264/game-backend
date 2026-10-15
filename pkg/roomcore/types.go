@@ -19,19 +19,26 @@ type ReadWriteConn interface {
 
 // Command 是房间内消息命令。
 type Command struct {
-	Type     string          `json:"type"`
-	PlayerID string          `json:"playerID"`
-	Payload  json.RawMessage `json:"payload"`
-	Conn     ReadWriteConn   `json:"-"`
+	Type         string          `json:"type"`
+	PlayerID     string          `json:"playerID"`
+	Payload      json.RawMessage `json:"payload"`
+	Conn         ReadWriteConn   `json:"-"`
+	RequestID    string          `json:"requestId,omitempty"`
+	PhaseVersion *uint64         `json:"phaseVersion,omitempty"`
+	Name         string          `json:"-"`
+	Avatar       string          `json:"-"`
 }
 
 // PlayerConn 描述房间中的一个玩家连接。
 type PlayerConn struct {
-	PlayerID string        `json:"playerID"`
-	Conn     WriteOnlyConn `json:"-"`
-	Online   bool          `json:"online"`
-	Ready    bool          `json:"ready"`
-	AI       bool          `json:"ai"`
+	PlayerID  string        `json:"playerID"`
+	Conn      WriteOnlyConn `json:"-"`
+	Online    bool          `json:"online"`
+	Ready     bool          `json:"ready"`
+	AI        bool          `json:"ai"`
+	SeatIndex int           `json:"seatIndex"`
+	Name      string        `json:"name,omitempty"`
+	Avatar    string        `json:"avatar,omitempty"`
 }
 
 // Base 是所有游戏房间共享的基础结构。各 game 的 domain.Room 通过内嵌 *Base 复用。

@@ -1,6 +1,7 @@
 package roompkg
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -37,11 +38,31 @@ func (r *RoomService) Run() {
 	for {
 		select {
 		case cmd := <-r.Room.CmdCh:
-			r.handleCommand(cmd)
+			if cmd.Type == "acquire_timeout" {
+				action, ok := r.resolveTimeout(cmd)
+				if !ok {
+					continue
+				}
+				cmd = action
+			}
+			previousStatus, previousPlayer := r.Room.State.RoomStatus, r.Room.State.CurrentPlayer
+			previousTimeoutPlayer := CurrentTimeoutPlayer(r.Room)
+			if !r.handleCommand(cmd) {
+				continue
+			}
 
 			// 兜底：并购结算阶段，自动替"已离线的真人持股玩家"完成结算，
 			// 避免玩家在并购触发前就已离线导致结算队列永久卡死。
 			AutoSettleDisconnectedHolder(r.Room)
+			var result map[string]interface{}
+			if r.Room.State.RoomStatus != domain.RoomStatusMatch {
+				result, _ = game.RecomputeDerivedState(r.Room)
+			}
+			turnCompleted := commandCompletedTurn(cmd.Type, previousStatus, previousPlayer, r.Room.State)
+			if game.ShouldFinalizeEnd(r.Room, turnCompleted) {
+				r.Room.State.RoomStatus = domain.RoomStatusEnd
+			}
+			r.advancePhase(previousStatus, turnCompleted)
 
 			// 开局：MatchBegin 处理后 RoomStatus 切到 Waiting，启动 recorder。
 			// 但 startRecording 需要 GameStartTime 已经被赋值，所以放在 game_ready 全员到齐之后更稳妥。
@@ -55,15 +76,21 @@ func (r *RoomService) Run() {
 			r.recordEvent(cmd)
 
 			// 命令处理完毕后，根据当前 RoomStatus 重新启动/清空思考超时定时器。
-			roomcore.RearmThinkTimer(r.svc)
+			if previousStatus != r.Room.State.RoomStatus || previousPlayer != r.Room.State.CurrentPlayer ||
+				previousTimeoutPlayer != CurrentTimeoutPlayer(r.Room) {
+				r.armTimer()
+			}
 
 			if r.Room.State.RoomStatus == domain.RoomStatusMatch {
 				game.BroadcastToMatch(r.Room)
 			} else {
-				game.BroadcastToRoom(r.Room)
+				game.BroadcastRoomSnapshot(r.Room, result)
 				if r.Room.State.RoomStatus == domain.RoomStatusEnd && r.Recorder != nil {
 					r.finishRecording()
 				}
+			}
+			if cmd.RequestID != "" {
+				r.reply(cmd, "", "操作成功")
 			}
 		case req := <-r.snapshotCh:
 			req.reply <- r.buildSnapshot()
@@ -81,10 +108,17 @@ func (r *RoomService) Run() {
 }
 
 // handleCommand 处理房间命令
-func (r *RoomService) handleCommand(cmd domain.Command) {
+func (r *RoomService) handleCommand(cmd domain.Command) bool {
+	if !r.validateCommand(cmd) {
+		return false
+	}
 	switch cmd.Type {
 	case "connect":
 		roomcore.HandleConnect(r.svc, cmd)
+		if cmd.PlayerID == r.Room.State.OwnerID {
+			r.Room.State.OwnerName = cmd.Name
+			r.Room.State.OwnerAvatar = cmd.Avatar
+		}
 	case "disconnect":
 		roomcore.HandleDisconnect(r.svc, cmd)
 	case "match_ready":
@@ -94,7 +128,21 @@ func (r *RoomService) handleCommand(cmd domain.Command) {
 	case "match_add_ai":
 		roomcore.HandleAddAI(r.svc, cmd)
 	case "match_remove_player":
-		roomcore.HandleRemovePlayer(r.svc, cmd)
+		var p struct {
+			PlayerID string `json:"playerID"`
+		}
+		_ = json.Unmarshal(cmd.Payload, &p)
+		r.reply(domain.Command{PlayerID: p.PlayerID}, "removed", "你已被移出房间")
+		if pc := r.Room.Connections[p.PlayerID]; pc != nil && pc.Conn != nil {
+			pc.Conn.Close()
+		}
+		roomcore.RemovePlayer(r.svc, p.PlayerID)
+	case "room_update_settings":
+		var p struct {
+			Visibility string `json:"visibility"`
+		}
+		_ = json.Unmarshal(cmd.Payload, &p)
+		r.Room.State.Visibility = p.Visibility
 	case "game_ready":
 		roomcore.HandleReadyMessage(r.svc, cmd)
 	case "game_place_tile":
@@ -107,6 +155,8 @@ func (r *RoomService) handleCommand(cmd domain.Command) {
 		game.HandleBuyStockMessage(r.Room, cmd)
 	case "game_merging_selection":
 		game.HandleMergingSelectionMessage(r.Room, cmd)
+	case "game_end_vote":
+		game.HandleEndVoteMessage(r.Room, cmd)
 	case "turn_timeout":
 		game.HandleTurnTimeoutMessage(r.Room, cmd)
 	case "game_play_audio":
@@ -120,7 +170,9 @@ func (r *RoomService) handleCommand(cmd domain.Command) {
 		game.HandleRestartGameMessage(r.Room, cmd)
 	default:
 		logger.Warn("未知命令类型", logger.F("command_type", cmd.Type))
+		return false
 	}
+	return true
 }
 
 func HandleMatchBegin(r *domain.Room, cmd domain.Command) {

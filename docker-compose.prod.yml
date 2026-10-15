@@ -5,9 +5,9 @@ services:
     environment:
       - POSTGRES_DSN=${POSTGRES_DSN}
       - AUTH_CENTER_URL=${AUTH_CENTER_URL:-http://pam-gateway:8080/pam-api/platform/auth}
-      - ACQUIRE_LOADTEST_ENABLED=${ACQUIRE_LOADTEST_ENABLED:-false}
-      - ACQUIRE_LOADTEST_TOKEN=${ACQUIRE_LOADTEST_TOKEN:-}
-      - ACQUIRE_DEBUG_ADDR=${ACQUIRE_DEBUG_ADDR:-}
+    #   - ACQUIRE_LOADTEST_ENABLED=${ACQUIRE_LOADTEST_ENABLED:-true}
+    #   - ACQUIRE_LOADTEST_TOKEN=${ACQUIRE_LOADTEST_TOKEN:-local-test-token}
+    #   - ACQUIRE_DEBUG_ADDR=${ACQUIRE_DEBUG_ADDR:-}
     volumes:
       - /var/log/acquire:/app/game_logs
     networks:

@@ -31,10 +31,13 @@ func NewRoomService(roomID, ownerID string) *RoomService {
 			OwnerID:       ownerID,
 			MaxPlayers:    MaxPlayers,
 			CurrentPlayer: "",
+			Visibility:    "public",
+			PhaseVersion:  1,
 
 			BoardTiles: make(map[string]*domain.Tile),
 			Players:    make(map[string]*domain.PlayerState),
 			Companies:  make(map[string]*domain.CompanyState),
+			EndGame:    domain.EndGameState{Votes: make(map[string]bool)},
 		},
 	}
 
@@ -54,6 +57,8 @@ func NewRoomService(roomID, ownerID string) *RoomService {
 			rs.Room.State.OwnerID = pid
 			if pc, ok := rs.Room.Connections[pid]; ok {
 				pc.Ready = true
+				rs.Room.State.OwnerName = pc.Name
+				rs.Room.State.OwnerAvatar = pc.Avatar
 			}
 		},
 		OnAllReady: func(rs *RoomService, cmd roomcore.Command) {

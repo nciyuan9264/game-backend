@@ -1,9 +1,13 @@
 package data
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/nciyuan9264/game-backend/internal/games/acquire/domain/domain"
+	"github.com/nciyuan9264/game-backend/pkg/roomcore"
 )
 
 func TestUtilsUsesMathRandV2InsteadOfExpRand(t *testing.T) {
@@ -13,5 +17,27 @@ func TestUtilsUsesMathRandV2InsteadOfExpRand(t *testing.T) {
 	}
 	if strings.Contains(string(src), "golang.org/x/exp/rand") {
 		t.Fatal("utils.go should use math/rand/v2 instead of golang.org/x/exp/rand")
+	}
+}
+
+func TestInitPlayerDataDealsSixTiles(t *testing.T) {
+	room := &domain.Room{
+		Base: roomcore.NewBase("room", 1),
+		State: &domain.GameState{
+			BoardTiles: map[string]*domain.Tile{},
+			Players:    map[string]*domain.PlayerState{},
+		},
+	}
+	for column := 1; column <= 12; column++ {
+		for row := 'A'; row <= 'I'; row++ {
+			id := fmt.Sprintf("%d%c", column, row)
+			room.State.BoardTiles[id] = &domain.Tile{ID: id}
+		}
+	}
+	if err := InitPlayerData(room, "player"); err != nil {
+		t.Fatalf("InitPlayerData returned error: %v", err)
+	}
+	if got := len(room.State.Players["player"].Tiles); got != 6 {
+		t.Fatalf("initial tiles = %d, want 6", got)
 	}
 }

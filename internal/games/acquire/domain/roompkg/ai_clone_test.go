@@ -67,7 +67,17 @@ func newAITestRoom() *domain.Room {
 				"Sackson": {
 					Hoders:    []string{"human_001", "ai_001"},
 					Dividends: map[string]int{"human_001": 3000, "ai_001": 1500},
+					Settled: map[string]domain.MergingSettleResult{
+						"done_001": {HoldingBefore: 4, SellAmount: 2, ExchangeAmount: 2},
+					},
 				},
+			},
+			EndGame: domain.EndGameState{
+				Eligible:  true,
+				Condition: "company_size",
+				Company:   "Tower",
+				TileCount: 41,
+				Votes:     map[string]bool{"human_001": false, "ai_001": true},
 			},
 		},
 	}
@@ -86,7 +96,11 @@ func TestCloneRoomForAISimulationDoesNotAliasState(t *testing.T) {
 	settle := cloned.State.MergeSettleData["Sackson"]
 	settle.Hoders[0] = "ai_001"
 	settle.Dividends["human_001"] = 1
+	result := settle.Settled["done_001"]
+	result.SellAmount = 4
+	settle.Settled["done_001"] = result
 	cloned.State.MergeSettleData["Sackson"] = settle
+	cloned.State.EndGame.Votes["human_001"] = true
 
 	if original.State.Players["ai_001"].Money == 1 {
 		t.Fatalf("player money aliased")
@@ -111,6 +125,12 @@ func TestCloneRoomForAISimulationDoesNotAliasState(t *testing.T) {
 	}
 	if original.State.MergeSettleData["Sackson"].Dividends["human_001"] == 1 {
 		t.Fatalf("merge settle dividends aliased")
+	}
+	if original.State.MergeSettleData["Sackson"].Settled["done_001"].SellAmount == 4 {
+		t.Fatalf("merge settle receipts aliased")
+	}
+	if original.State.EndGame.Votes["human_001"] {
+		t.Fatalf("end game votes aliased")
 	}
 }
 

@@ -94,9 +94,7 @@ func (r *Repo) ListByUser(ctx context.Context, userID int64, gameType string, li
 }
 
 // Detail returns one game with players and events. gameType scopes access.
-// eventColumnsNoSnapshot 列出 game_events 除 state_snapshot 外的所有列。
-// state_snapshot 体积巨大（每行一份完整 GameState），仅回放需要；
-// 其余接口（如对局详情）查询时必须排除它，否则 SELECT * 会拖出 MB 级数据导致慢查询。
+// eventColumnsNoSnapshot 排除两个快照大字段，只保留事件重放需要的轻量列。
 var eventColumnsNoSnapshot = []string{"id", "game_id", "seq", "occurred_at", "player_id", "cmd_type", "payload"}
 
 func (r *Repo) Detail(ctx context.Context, gameID int64, gameType string) (*Game, []GamePlayer, []GameEvent, error) {
@@ -140,6 +138,68 @@ func (r *Repo) DetailForReplay(ctx context.Context, gameID int64, gameType strin
 		return nil, nil, nil, err
 	}
 	return &g, players, events, nil
+}
+
+// ReplayPage returns one game, its players, the event count, and only the
+// requested event range with authoritative snapshot columns included.
+func (r *Repo) ReplayPage(
+	ctx context.Context,
+	gameID int64,
+	gameType string,
+	eventOffset int,
+	eventLimit int,
+) (*Game, []GamePlayer, int, []GameEvent, error) {
+	var g Game
+	if err := r.db.WithContext(ctx).Where("id = ? AND game_type = ?", gameID, gameType).First(&g).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, 0, nil, nil
+		}
+		return nil, nil, 0, nil, err
+	}
+
+	var players []GamePlayer
+	if err := r.db.WithContext(ctx).
+		Where("game_id = ?", gameID).
+		Order("seat_index ASC").
+		Find(&players).Error; err != nil {
+		return nil, nil, 0, nil, err
+	}
+
+	var totalEvents int64
+	if err := r.db.WithContext(ctx).
+		Model(&GameEvent{}).
+		Where("game_id = ?", gameID).
+		Count(&totalEvents).Error; err != nil {
+		return nil, nil, 0, nil, err
+	}
+
+	events := make([]GameEvent, 0, eventLimit)
+	if eventLimit > 0 && eventOffset < int(totalEvents) {
+		if err := r.db.WithContext(ctx).
+			Where("game_id = ?", gameID).
+			Order("seq ASC").
+			Offset(eventOffset).
+			Limit(eventLimit).
+			Find(&events).Error; err != nil {
+			return nil, nil, 0, nil, err
+		}
+	}
+
+	return &g, players, int(totalEvents), events, nil
+}
+
+// ReplayEventsWithoutSnapshots returns all lightweight events for legacy
+// games that do not have an authoritative snapshot on every requested event.
+func (r *Repo) ReplayEventsWithoutSnapshots(ctx context.Context, gameID int64) ([]GameEvent, error) {
+	var events []GameEvent
+	if err := r.db.WithContext(ctx).
+		Select(eventColumnsNoSnapshot).
+		Where("game_id = ?", gameID).
+		Order("seq ASC").
+		Find(&events).Error; err != nil {
+		return nil, err
+	}
+	return events, nil
 }
 
 // EventsUpTo returns events in [0, targetSeq].

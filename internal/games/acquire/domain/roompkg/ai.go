@@ -736,7 +736,13 @@ func CurrentTimeoutPlayer(r *domain.Room) string {
 		return ""
 	}
 	if r.State.RoomStatus == domain.RoomStatusMergingSettle {
-		for _, d := range r.State.MergeSettleData {
+		companies := make([]string, 0, len(r.State.MergeSettleData))
+		for company := range r.State.MergeSettleData {
+			companies = append(companies, company)
+		}
+		sort.Strings(companies)
+		for _, company := range companies {
+			d := r.State.MergeSettleData[company]
 			if len(d.Hoders) == 0 {
 				continue
 			}

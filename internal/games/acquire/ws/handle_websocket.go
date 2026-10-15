@@ -2,6 +2,7 @@ package ws
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -14,8 +15,10 @@ import (
 )
 
 type Message struct {
-	Type    string          `json:"type"`
-	Payload json.RawMessage `json:"payload"`
+	Type         string          `json:"type"`
+	Payload      json.RawMessage `json:"payload"`
+	RequestID    string          `json:"requestId"`
+	PhaseVersion *uint64         `json:"phaseVersion"`
 }
 
 type wsReadStats struct {
@@ -37,7 +40,7 @@ func upgradeConnection(c *gin.Context) (*websocket.Conn, error) {
 	return conn, err
 }
 
-func readLoop(conn *websocket.Conn, room *domain.Room, playerID string) {
+func readLoop(conn *domain.RealConn, room *domain.Room, playerID string) {
 	stats := wsReadStats{startedAt: time.Now()}
 	defer func() {
 		// 断线也是 Command
@@ -48,9 +51,13 @@ func readLoop(conn *websocket.Conn, room *domain.Room, playerID string) {
 			logger.F("last_type", stats.lastType),
 			logger.F("duration_ms", time.Since(stats.startedAt).Milliseconds()),
 		)
-		room.CmdCh <- domain.Command{
+		select {
+		case room.CmdCh <- domain.Command{
 			PlayerID: playerID,
 			Type:     "disconnect",
+			Conn:     conn,
+		}:
+		case <-room.QuitCh:
 		}
 		conn.Close()
 	}()
@@ -73,16 +80,36 @@ func readLoop(conn *websocket.Conn, room *domain.Room, playerID string) {
 		stats.lastType = msg.Type
 
 		// WS → Command
-		room.CmdCh <- domain.Command{
-			Type:     msg.Type,
-			Payload:  msg.Payload,
-			PlayerID: playerID,
-			Conn:     conn,
+		if !clientCommandAllowed(msg.Type) {
+			data, _ := json.Marshal(map[string]string{
+				"type": "error", "code": "invalid_command", "message": "不支持的操作", "requestId": msg.RequestID,
+			})
+			conn.WriteMessage(websocket.TextMessage, data)
+			continue
+		}
+		select {
+		case room.CmdCh <- domain.Command{
+			Type:         msg.Type,
+			Payload:      msg.Payload,
+			PlayerID:     playerID,
+			Conn:         conn,
+			RequestID:    msg.RequestID,
+			PhaseVersion: msg.PhaseVersion,
+		}:
+		case <-room.QuitCh:
+			return
 		}
 	}
 }
 
 func HandleWebSocket(c *gin.Context) {
+	id, authenticated := c.Get("user_id")
+	if !authenticated {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": "unauthorized"})
+		return
+	}
+	playerID := fmt.Sprintf("%s-%v", c.GetString("name"), id)
+	roomID := c.Query("roomID")
 	conn, err := upgradeConnection(c)
 	if err != nil {
 		return
@@ -92,8 +119,6 @@ func HandleWebSocket(c *gin.Context) {
 	realConn := domain.NewRealConn(conn)
 
 	// 1️⃣ 解析参数（保持不变）
-	roomID := c.Query("roomID")
-	playerID := c.Query("userID")
 	if roomID == "" || playerID == "" {
 		logger.Warn("WebSocket missing query",
 			logger.F("room_id", roomID),
@@ -114,7 +139,7 @@ func HandleWebSocket(c *gin.Context) {
 			logger.F("remote_addr", c.Request.RemoteAddr),
 			logger.F("forwarded_for", c.GetHeader("X-Forwarded-For")),
 		)
-		realConn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"房间不存在"}`))
+		realConn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","code":"room_not_found","message":"房间不存在"}`))
 		realConn.Close()
 		return
 	}
@@ -128,14 +153,32 @@ func HandleWebSocket(c *gin.Context) {
 	)
 
 	// 3️⃣ 通知房间：有人 join（Command）
-	room.Room.CmdCh <- domain.Command{
+	select {
+	case room.Room.CmdCh <- domain.Command{
 		Type:     "connect",
 		PlayerID: playerID,
 		Conn:     realConn,
+		Name:     c.GetString("name"),
+		Avatar:   c.GetString("avatar"),
+	}:
+	case <-room.Room.QuitCh:
+		realConn.Close()
+		return
 	}
 
 	// 4️⃣ 启动 WS 读循环（每个连接一个 goroutine）
-	go readLoop(realConn.Conn, room.Room, playerID)
+	go readLoop(realConn, room.Room, playerID)
+}
+
+func clientCommandAllowed(command string) bool {
+	switch command {
+	case "match_ready", "match_begin", "match_add_ai", "match_remove_player", "room_update_settings",
+		"game_ready", "game_place_tile", "game_create_company", "game_merging_settle",
+		"game_buy_stock", "game_merging_selection", "game_end_vote", "game_play_audio", "game_restart_game":
+		return true
+	default:
+		return false
+	}
 }
 
 func closeDescription(err error) string {

@@ -10,13 +10,21 @@ import (
 
 type RealConn struct {
 	*websocket.Conn
-	PingInterval time.Duration
-	LastPongTime time.Time
-	Done         chan struct{}
-	closeOnce    sync.Once
+	PingInterval  time.Duration
+	LastPongTime  time.Time
+	Done          chan struct{}
+	closeOnce     sync.Once
+	writeMu       sync.Mutex
+	pongMu        sync.Mutex
+	heartbeatOnce sync.Once
 }
 
 func (r *RealConn) WriteMessage(messageType int, data []byte) error {
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
+	if err := r.Conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return err
+	}
 	return r.Conn.WriteMessage(messageType, data)
 }
 
@@ -29,38 +37,46 @@ func (r *RealConn) Close() error {
 }
 
 func (r *RealConn) StartHeartbeat() {
-	go func() {
-		ticker := time.NewTicker(r.PingInterval)
-		defer ticker.Stop()
+	r.heartbeatOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(r.PingInterval)
+			defer ticker.Stop()
 
-		for {
-			select {
-			case <-ticker.C:
-				if time.Since(r.LastPongTime) > r.PingInterval*2 {
-					r.Close()
+			for {
+				select {
+				case <-ticker.C:
+					r.pongMu.Lock()
+					expired := time.Since(r.LastPongTime) > r.PingInterval*2
+					r.pongMu.Unlock()
+					if expired {
+						r.Close()
+						return
+					}
+					r.WriteMessage(websocket.PingMessage, []byte{})
+					log.Println("✅ 发送心跳包")
+				case <-r.Done:
 					return
 				}
-				r.WriteMessage(websocket.PingMessage, []byte{})
-				log.Println("✅ 发送心跳包")
-			case <-r.Done:
-				return
 			}
-		}
-	}()
+		}()
 
-	r.Conn.SetPongHandler(func(string) error {
-		r.LastPongTime = time.Now()
-		return nil
 	})
 }
 
 func NewRealConn(conn *websocket.Conn) *RealConn {
-	return &RealConn{
+	r := &RealConn{
 		Conn:         conn,
 		PingInterval: 30 * time.Second,
 		LastPongTime: time.Now(),
 		Done:         make(chan struct{}),
 	}
+	conn.SetPongHandler(func(string) error {
+		r.pongMu.Lock()
+		r.LastPongTime = time.Now()
+		r.pongMu.Unlock()
+		return nil
+	})
+	return r
 }
 
 // 玩家连接对象结构体
@@ -78,9 +94,16 @@ const (
 	RoomStatusEnd              RoomStatus = "end"
 )
 
+type MergingSettleResult struct {
+	HoldingBefore  int `json:"holdingBefore"`
+	SellAmount     int `json:"sellAmount"`
+	ExchangeAmount int `json:"exchangeAmount"`
+}
+
 type SettleData struct {
-	Hoders    []string       `json:"hoders"`
-	Dividends map[string]int `json:"dividends"`
+	Hoders    []string                       `json:"hoders"`
+	Dividends map[string]int                 `json:"dividends"`
+	Settled   map[string]MergingSettleResult `json:"settled,omitempty"`
 }
 
 type MergingSettleItem struct {

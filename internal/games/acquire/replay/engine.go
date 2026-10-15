@@ -61,12 +61,13 @@ func ReplayTo(g *gamehistory.Game, players []gamehistory.GamePlayer, events []ga
 
 	// 2. 构造离线 Room。Connections 用来让 handler 遍历玩家。
 	base := roomcore.NewBase(g.RoomID, 0)
-	for _, p := range players {
+	for index, p := range players {
 		base.Connections[p.PlayerID] = &roomcore.PlayerConn{
-			PlayerID: p.PlayerID,
-			Conn:     nil,
-			Online:   false,
-			AI:       p.IsAI,
+			PlayerID:  p.PlayerID,
+			Conn:      nil,
+			Online:    false,
+			AI:        p.IsAI,
+			SeatIndex: index,
 		}
 		base.PlayerSeq = append(base.PlayerSeq, p.PlayerID)
 	}
@@ -84,10 +85,10 @@ func ReplayTo(g *gamehistory.Game, players []gamehistory.GamePlayer, events []ga
 		if limit == 0 {
 			// 初始态：用 initial_state 重算 result。
 			initResult, _ := acgame.RecomputeDerivedState(r)
-			return buildSnapshotFromState(state, initResult, base, events, targetSeq, 0), nil
+			return buildSnapshotFromState(state, initResult, base, len(events), targetSeq, nil), nil
 		}
 		if st, res, ok := decodeSnapshot(events[limit-1]); ok {
-			return buildSnapshotFromState(st, res, base, events, events[limit-1].Seq, limit), nil
+			return buildSnapshotFromState(st, res, base, len(events), events[limit-1].Seq, &events[limit-1]), nil
 		}
 		// decode 失败兜底：落到下方重算路径。
 	}
@@ -121,6 +122,8 @@ func ReplayTo(g *gamehistory.Game, players []gamehistory.GamePlayer, events []ga
 
 	for i := 0; i < limit; i++ {
 		e := events[i]
+		previousStatus := r.State.RoomStatus
+		previousPlayer := r.State.CurrentPlayer
 		applyEvent(r, e)
 		if e.CmdType == "game_place_tile" {
 			cursors[e.PlayerID]++
@@ -128,9 +131,184 @@ func ReplayTo(g *gamehistory.Game, players []gamehistory.GamePlayer, events []ga
 		// 与生产 BroadcastToRoom 行为对齐：每条命令处理后立即同步 derived state，
 		// 让下一条 buy_stock / merging_settle 读到正确的 StockPrice / StockTotal / Tiles。
 		acgame.RecomputeDerivedState(r)
+		if acgame.ShouldFinalizeEnd(r, replayTurnCompleted(e.CmdType, previousStatus, previousPlayer, r.State)) {
+			r.State.RoomStatus = domain.RoomStatusEnd
+		}
 	}
 
-	return buildSnapshot(r, state, base, events, futureByPlayer, cursors, targetSeq, limit), nil
+	var currentEvent *gamehistory.GameEvent
+	if limit > 0 {
+		currentEvent = &events[limit-1]
+	}
+	return buildSnapshot(r, state, base, len(events), futureByPlayer, cursors, targetSeq, currentEvent), nil
+}
+
+// ReplayPage builds a snapshot range. offset and limit use snapshot indexes:
+// index 0 is the initial state and index N+1 is the state after event N.
+// pageEvents must contain only the event range covered by this page. For
+// legacy games with missing authoritative snapshots, fallbackEvents must
+// contain all lightweight events so handlers can replay from the beginning.
+func ReplayPage(
+	g *gamehistory.Game,
+	players []gamehistory.GamePlayer,
+	totalEvents int,
+	offset int,
+	limit int,
+	pageEvents []gamehistory.GameEvent,
+	fallbackEvents []gamehistory.GameEvent,
+) ([]*Snapshot, error) {
+	if g == nil {
+		return nil, fmt.Errorf("game is nil")
+	}
+	if totalEvents < 0 || offset < 0 || limit < 0 {
+		return nil, fmt.Errorf("invalid replay page: totalEvents=%d offset=%d limit=%d", totalEvents, offset, limit)
+	}
+
+	totalSnapshots := totalEvents + 1
+	if limit == 0 || offset >= totalSnapshots {
+		return []*Snapshot{}, nil
+	}
+	end := offset + limit
+	if end > totalSnapshots {
+		end = totalSnapshots
+	}
+	firstEventSnapshot := offset
+	if firstEventSnapshot < 1 {
+		firstEventSnapshot = 1
+	}
+	expectedEvents := end - firstEventSnapshot
+	if len(pageEvents) != expectedEvents {
+		return nil, fmt.Errorf("unexpected replay page event count: got=%d want=%d", len(pageEvents), expectedEvents)
+	}
+
+	state := &domain.GameState{}
+	if len(g.InitialState) > 0 {
+		if err := json.Unmarshal(g.InitialState, state); err != nil {
+			return nil, fmt.Errorf("反序列化 initial_state 失败: %w", err)
+		}
+	}
+	if state.BoardTiles == nil {
+		state.BoardTiles = map[string]*domain.Tile{}
+	}
+	if state.Players == nil {
+		state.Players = map[string]*domain.PlayerState{}
+	}
+	if state.Companies == nil {
+		state.Companies = map[string]*domain.CompanyState{}
+	}
+
+	base := roomcore.NewBase(g.RoomID, 0)
+	for index, p := range players {
+		base.Connections[p.PlayerID] = &roomcore.PlayerConn{
+			PlayerID:  p.PlayerID,
+			Conn:      nil,
+			Online:    false,
+			AI:        p.IsAI,
+			SeatIndex: index,
+		}
+		base.PlayerSeq = append(base.PlayerSeq, p.PlayerID)
+	}
+	r := &domain.Room{Base: base, State: state}
+
+	if allHaveSnapshot(pageEvents) {
+		snaps := make([]*Snapshot, 0, end-offset)
+		if offset == 0 {
+			initResult, _ := acgame.RecomputeDerivedState(r)
+			snaps = append(snaps, buildSnapshotFromState(state, initResult, base, totalEvents, -1, nil))
+		}
+		for i := range pageEvents {
+			st, res, ok := decodeSnapshot(pageEvents[i])
+			if !ok {
+				return nil, fmt.Errorf("decode authoritative snapshot failed at seq %d", pageEvents[i].Seq)
+			}
+			snaps = append(snaps, buildSnapshotFromState(
+				st,
+				res,
+				base,
+				totalEvents,
+				pageEvents[i].Seq,
+				&pageEvents[i],
+			))
+		}
+		return snaps, nil
+	}
+
+	if len(fallbackEvents) != totalEvents {
+		return nil, fmt.Errorf("legacy replay requires %d fallback events, got %d", totalEvents, len(fallbackEvents))
+	}
+	return replayPageByReapply(r, state, base, totalEvents, offset, end, fallbackEvents)
+}
+
+func replayPageByReapply(
+	r *domain.Room,
+	state *domain.GameState,
+	base *roomcore.Base,
+	totalEvents int,
+	offset int,
+	end int,
+	events []gamehistory.GameEvent,
+) ([]*Snapshot, error) {
+	futureByPlayer := make(map[string][]string)
+	for _, ev := range events {
+		if ev.CmdType != "game_place_tile" {
+			continue
+		}
+		var p struct {
+			TileKey string `json:"tileKey"`
+		}
+		if err := json.Unmarshal(ev.Payload, &p); err != nil || p.TileKey == "" {
+			continue
+		}
+		futureByPlayer[ev.PlayerID] = append(futureByPlayer[ev.PlayerID], p.TileKey)
+	}
+	cursors := make(map[string]int, len(futureByPlayer))
+	snaps := make([]*Snapshot, 0, end-offset)
+
+	acgame.RecomputeDerivedState(r)
+	if offset == 0 {
+		snaps = append(snaps, buildSnapshot(
+			r,
+			state,
+			base,
+			totalEvents,
+			futureByPlayer,
+			cursors,
+			-1,
+			nil,
+		))
+	}
+
+	lastEventIndex := end - 2
+	for i := 0; i <= lastEventIndex && i < len(events); i++ {
+		e := events[i]
+		previousStatus := r.State.RoomStatus
+		previousPlayer := r.State.CurrentPlayer
+		applyEvent(r, e)
+		if e.CmdType == "game_place_tile" {
+			cursors[e.PlayerID]++
+		}
+		acgame.RecomputeDerivedState(r)
+		if acgame.ShouldFinalizeEnd(r, replayTurnCompleted(e.CmdType, previousStatus, previousPlayer, r.State)) {
+			r.State.RoomStatus = domain.RoomStatusEnd
+		}
+
+		snapshotIndex := i + 1
+		if snapshotIndex < offset {
+			continue
+		}
+		snaps = append(snaps, buildSnapshot(
+			r,
+			state,
+			base,
+			totalEvents,
+			futureByPlayer,
+			cursors,
+			e.Seq,
+			&events[i],
+		))
+	}
+
+	return snaps, nil
 }
 
 // ReplayAll 单趟重放整局，产出每一步的快照数组（含初始态 seq=-1）。
@@ -161,12 +339,13 @@ func ReplayAll(g *gamehistory.Game, players []gamehistory.GamePlayer, events []g
 
 	// 2. 构造离线 Room。
 	base := roomcore.NewBase(g.RoomID, 0)
-	for _, p := range players {
+	for index, p := range players {
 		base.Connections[p.PlayerID] = &roomcore.PlayerConn{
-			PlayerID: p.PlayerID,
-			Conn:     nil,
-			Online:   false,
-			AI:       p.IsAI,
+			PlayerID:  p.PlayerID,
+			Conn:      nil,
+			Online:    false,
+			AI:        p.IsAI,
+			SeatIndex: index,
 		}
 		base.PlayerSeq = append(base.PlayerSeq, p.PlayerID)
 	}
@@ -178,14 +357,14 @@ func ReplayAll(g *gamehistory.Game, players []gamehistory.GamePlayer, events []g
 		snaps := make([]*Snapshot, 0, len(events)+1)
 		// 初始态（应用 0 个事件，seq=-1）：用 initial_state 重算 result。
 		initResult, _ := acgame.RecomputeDerivedState(r)
-		snaps = append(snaps, buildSnapshotFromState(state, initResult, base, events, -1, 0))
+		snaps = append(snaps, buildSnapshotFromState(state, initResult, base, len(events), -1, nil))
 		for i := 0; i < len(events); i++ {
 			st, res, ok := decodeSnapshot(events[i])
 			if !ok {
 				// 理论上不会发生（allHaveSnapshot 已校验非空），稳一手：回退重算路径。
 				return replayAllByReapply(r, state, base, events)
 			}
-			snaps = append(snaps, buildSnapshotFromState(st, res, base, events, events[i].Seq, i+1))
+			snaps = append(snaps, buildSnapshotFromState(st, res, base, len(events), events[i].Seq, &events[i]))
 		}
 		return snaps, nil
 	}
@@ -217,7 +396,7 @@ func replayAllByReapply(r *domain.Room, state *domain.GameState, base *roomcore.
 
 	// 初始态（应用 0 个事件，seq=-1）。
 	acgame.RecomputeDerivedState(r)
-	snaps = append(snaps, buildSnapshot(r, state, base, events, futureByPlayer, cursors, -1, 0))
+	snaps = append(snaps, buildSnapshot(r, state, base, len(events), futureByPlayer, cursors, -1, nil))
 
 	// 逐步推进，每步产出一帧。
 	for i := 0; i < len(events); i++ {
@@ -232,9 +411,12 @@ func replayAllByReapply(r *domain.Room, state *domain.GameState, base *roomcore.
 			cursors[e.PlayerID]++
 		}
 		acgame.RecomputeDerivedState(r)
+		if acgame.ShouldFinalizeEnd(r, replayTurnCompleted(e.CmdType, prevStatus, prevPlayer, r.State)) {
+			r.State.RoomStatus = domain.RoomStatusEnd
+		}
 
 		// 若白名单命令应用后三项关键状态均未变，疑似被守卫拒绝 → 分叉。
-		if gamehistory.IsRecordableCmd(e.CmdType) &&
+		if e.CmdType != "game_end_vote" && gamehistory.IsRecordableCmd(e.CmdType) &&
 			r.State.RoomStatus == prevStatus &&
 			r.State.CurrentPlayer == prevPlayer &&
 			r.State.LastTileKey == prevLastTile {
@@ -246,7 +428,7 @@ func replayAllByReapply(r *domain.Room, state *domain.GameState, base *roomcore.
 				logger.F("status", string(r.State.RoomStatus)))
 		}
 
-		snaps = append(snaps, buildSnapshot(r, state, base, events, futureByPlayer, cursors, e.Seq, i+1))
+		snaps = append(snaps, buildSnapshot(r, state, base, len(events), futureByPlayer, cursors, e.Seq, &events[i]))
 	}
 
 	return snaps, nil
@@ -278,7 +460,14 @@ func decodeSnapshot(e gamehistory.GameEvent) (*domain.GameState, map[string]inte
 // buildSnapshotFromState 直接用权威 state + result 组装一帧快照，
 // 不重跑 handler、不做 future-tile 推断（快照里已是处理后的最终态），
 // 输出结构与 buildSnapshot 完全一致，保证前端零改动。
-func buildSnapshotFromState(state *domain.GameState, result map[string]interface{}, base *roomcore.Base, events []gamehistory.GameEvent, targetSeq, limit int) *Snapshot {
+func buildSnapshotFromState(
+	state *domain.GameState,
+	result map[string]interface{},
+	base *roomcore.Base,
+	totalEvents int,
+	targetSeq int,
+	currentEvent *gamehistory.GameEvent,
+) *Snapshot {
 	playersInfo := make(map[string]interface{}, len(base.Connections))
 	for _, p := range base.Connections {
 		playersInfo[p.PlayerID] = map[string]interface{}{
@@ -295,25 +484,25 @@ func buildSnapshotFromState(state *domain.GameState, result map[string]interface
 
 	snap := &Snapshot{
 		Seq:         targetSeq,
-		TotalEvents: len(events),
+		TotalEvents: totalEvents,
 		RoomData: cloneStateMap(map[string]interface{}{
 			"companyInfo":   state.Companies,
 			"currentPlayer": state.CurrentPlayer,
 			"gameStatus":    state.RoomStatus,
 			"tiles":         state.BoardTiles,
 			"players":       playersInfo,
+			"endGame":       state.EndGame,
 		}),
 		PlayersData: cloneStateMap(playersData),
 		Result:      result,
 	}
 
-	if limit > 0 && limit-1 < len(events) {
-		ce := events[limit-1]
+	if currentEvent != nil {
 		snap.CurrentEvent = &EventInfo{
-			Seq:      ce.Seq,
-			PlayerID: ce.PlayerID,
-			CmdType:  ce.CmdType,
-			Payload:  json.RawMessage(ce.Payload),
+			Seq:      currentEvent.Seq,
+			PlayerID: currentEvent.PlayerID,
+			CmdType:  currentEvent.CmdType,
+			Payload:  json.RawMessage(currentEvent.Payload),
 		}
 	}
 
@@ -322,9 +511,18 @@ func buildSnapshotFromState(state *domain.GameState, result map[string]interface
 
 // buildSnapshot 用当前 Room 状态组装一帧快照。
 //
-// targetSeq 为该帧对应的事件 seq（初始态为 -1）；limit 为已应用的事件数量，用于定位 CurrentEvent。
+// targetSeq 为该帧对应的事件 seq（初始态为 -1）。
 // 同时会按 cursors 用 future 序列覆盖每个玩家的"未来 5 张牌"。
-func buildSnapshot(r *domain.Room, state *domain.GameState, base *roomcore.Base, events []gamehistory.GameEvent, futureByPlayer map[string][]string, cursors map[string]int, targetSeq, limit int) *Snapshot {
+func buildSnapshot(
+	r *domain.Room,
+	state *domain.GameState,
+	base *roomcore.Base,
+	totalEvents int,
+	futureByPlayer map[string][]string,
+	cursors map[string]int,
+	targetSeq int,
+	currentEvent *gamehistory.GameEvent,
+) *Snapshot {
 	// 用 future 序列覆盖每个玩家的"未来 5 张牌"——已被打出的不算，
 	// 已经在棋盘上的（避免重复显示）也跳过。
 	const handSize = 5
@@ -365,25 +563,25 @@ func buildSnapshot(r *domain.Room, state *domain.GameState, base *roomcore.Base,
 
 	snap := &Snapshot{
 		Seq:         targetSeq,
-		TotalEvents: len(events),
+		TotalEvents: totalEvents,
 		RoomData: cloneStateMap(map[string]interface{}{
 			"companyInfo":   state.Companies,
 			"currentPlayer": state.CurrentPlayer,
 			"gameStatus":    state.RoomStatus,
 			"tiles":         state.BoardTiles,
 			"players":       playersInfo,
+			"endGame":       state.EndGame,
 		}),
 		PlayersData: cloneStateMap(playersData),
 		Result:      result,
 	}
 
-	if limit > 0 && limit-1 < len(events) {
-		ce := events[limit-1]
+	if currentEvent != nil {
 		snap.CurrentEvent = &EventInfo{
-			Seq:      ce.Seq,
-			PlayerID: ce.PlayerID,
-			CmdType:  ce.CmdType,
-			Payload:  json.RawMessage(ce.Payload),
+			Seq:      currentEvent.Seq,
+			PlayerID: currentEvent.PlayerID,
+			CmdType:  currentEvent.CmdType,
+			Payload:  json.RawMessage(currentEvent.Payload),
 		}
 	}
 
@@ -448,8 +646,27 @@ func applyEvent(r *domain.Room, e gamehistory.GameEvent) {
 		acgame.HandleMergingSettleMessage(r, cmd)
 	case "game_buy_stock":
 		acgame.HandleBuyStockMessage(r, cmd)
+	case "game_end_vote":
+		acgame.HandleEndVoteMessage(r, cmd)
 	case "turn_timeout":
 		// 思考超时由 game 层在 BuildTimeoutCommand 时映射为具体动作；
 		// 第一版 acquire 暂未启用超时映射，这里忽略。
 	}
+}
+
+func replayTurnCompleted(cmdType string, previous domain.RoomStatus, previousPlayer string, state *domain.GameState) bool {
+	if state == nil {
+		return false
+	}
+	if state.RoomStatus == domain.RoomStatusSetTile && previous != domain.RoomStatusSetTile {
+		return true
+	}
+	if previousPlayer == "" {
+		return false
+	}
+	if previousPlayer != state.CurrentPlayer {
+		return true
+	}
+	return state.RoomStatus == domain.RoomStatusSetTile &&
+		(cmdType == "turn_timeout" || cmdType == "game_place_tile")
 }

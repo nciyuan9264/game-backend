@@ -31,7 +31,7 @@ func TestGetRoomListReturnsActorSnapshots(t *testing.T) {
 		close(rs.Room.QuitCh)
 	})
 
-	rooms, err := GetRoomList()
+	rooms, err := GetRoomList("owner-1")
 	if err != nil {
 		t.Fatalf("GetRoomList returned error: %v", err)
 	}

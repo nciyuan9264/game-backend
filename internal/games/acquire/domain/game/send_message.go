@@ -52,10 +52,9 @@ func getGameLogFilePath(r *domain.Room) string {
 }
 
 func WriteGameLog(r *domain.Room, playerID string, data []byte) {
+	logPath := getGameLogFilePath(r)
+	roomID := r.ID
 	go func() {
-		logPath := getGameLogFilePath(r)
-		roomID := r.ID
-
 		// 确保目录存在
 		if err := os.MkdirAll(path.Dir(logPath), 0755); err != nil {
 			logger.Error("创建日志目录失败", logger.F("room_id", roomID), logger.F("log_path", logPath), logger.F("error", err))
@@ -87,9 +86,12 @@ func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.Pl
 	playersInfo := make(map[string]interface{}, 0)
 	for _, p := range room.Connections {
 		playersInfo[p.PlayerID] = map[string]interface{}{
-			"playerID": p.PlayerID,
-			"online":   p.Online,
-			"ai":       p.AI,
+			"playerID":  p.PlayerID,
+			"online":    p.Online,
+			"ai":        p.AI,
+			"seatIndex": p.SeatIndex,
+			"name":      p.Name,
+			"avatar":    p.Avatar,
 		}
 	}
 
@@ -106,11 +108,15 @@ func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.Pl
 	}
 
 	msg := map[string]interface{}{
-		"type":       "ROOM_SYNC",
-		"result":     resultValue,
-		"playerId":   pc.PlayerID,
-		"playerData": room.State.Players[pc.PlayerID],
-		"ownerID":    room.State.OwnerID,
+		"type":         "ROOM_SYNC",
+		"result":       resultValue,
+		"playerId":     pc.PlayerID,
+		"playerData":   room.State.Players[pc.PlayerID],
+		"ownerID":      room.State.OwnerID,
+		"roomID":       room.ID,
+		"visibility":   room.State.Visibility,
+		"phaseVersion": room.State.PhaseVersion,
+		"turnNumber":   room.State.TurnNumber,
 		"roomData": map[string]interface{}{
 			"companyInfo":   room.State.Companies,
 			"currentPlayer": room.State.CurrentPlayer,
@@ -119,6 +125,10 @@ func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.Pl
 			"players":       playersInfo,
 			"turnDeadline":  turnDeadline,
 			"turnTimeoutMs": int64(room.Base.TurnTimeout / time.Millisecond),
+			"phaseVersion":  room.State.PhaseVersion,
+			"turnNumber":    room.State.TurnNumber,
+			"playerOrder":   room.PlayerSeq,
+			"endGame":       room.State.EndGame,
 		},
 		"tempData": map[string]interface{}{
 			"last_tile_key":           room.State.LastTileKey,
@@ -146,20 +156,28 @@ func SyncMatchMessage(conn domain.WriteOnlyConn, r *domain.Room, pc *domain.Play
 	playersInfo := make(map[string]dto.RoomPlayer, 0)
 	for _, p := range r.Connections {
 		playersInfo[p.PlayerID] = dto.RoomPlayer{
-			PlayerID: p.PlayerID,
-			Online:   p.Online,
-			AI:       p.AI,
-			Ready:    p.Ready,
+			PlayerID:  p.PlayerID,
+			Online:    p.Online,
+			AI:        p.AI,
+			Ready:     p.Ready,
+			SeatIndex: p.SeatIndex,
+			Name:      p.Name,
+			Avatar:    p.Avatar,
 		}
 	}
 
 	msg := dto.WsMatchSyncData{
-		Type:     "MATCH_SYNC",
-		RoomID:   r.ID,
-		OwnerID:  r.State.OwnerID,
-		Status:   string(r.State.RoomStatus),
-		PlayerID: pc.PlayerID,
-		Players:  playersInfo,
+		Type:         "MATCH_SYNC",
+		RoomID:       r.ID,
+		OwnerID:      r.State.OwnerID,
+		Status:       string(r.State.RoomStatus),
+		PlayerID:     pc.PlayerID,
+		Players:      playersInfo,
+		Visibility:   r.State.Visibility,
+		MaxPlayers:   domain.DefaultMaxPlayers,
+		PlayerOrder:  r.PlayerSeq,
+		PhaseVersion: r.State.PhaseVersion,
+		TurnNumber:   r.State.TurnNumber,
 	}
 
 	// ------- JSON 编码 -------
@@ -180,6 +198,11 @@ func SyncMatchMessage(conn domain.WriteOnlyConn, r *domain.Room, pc *domain.Play
 // 广播消息给房间内所有连接成功的玩家
 func BroadcastToRoom(r *domain.Room) {
 	result, _ := RecomputeDerivedState(r)
+	BroadcastRoomSnapshot(r, result)
+}
+
+// BroadcastRoomSnapshot sends a state already recomputed by the room actor.
+func BroadcastRoomSnapshot(r *domain.Room, result map[string]interface{}) {
 	if r.State.RoomStatus == domain.RoomStatusEnd {
 		clearThinkTimer(r)
 	}

@@ -30,6 +30,7 @@ func IsRecordableCmd(cmdType string) bool {
 		"game_merging_selection",
 		"game_merging_settle",
 		"game_buy_stock",
+		"game_end_vote",
 		"turn_timeout":
 		return true
 	}
