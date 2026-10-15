@@ -32,11 +32,16 @@ type AuthCenterPrincipal struct {
 	Roles  []string `json:"roles"`
 }
 
+type AuthCenterVerifyData struct {
+	Valid bool                 `json:"valid"`
+	User  *AuthCenterPrincipal `json:"user"`
+}
+
 // 封装后的认证中心返回结构
 type AuthCenterVerifyResponse struct {
-	StatusCode int                  `json:"status_code"`
-	Message    string               `json:"message"`
-	Data       *AuthCenterPrincipal `json:"data"`
+	StatusCode int                   `json:"status_code"`
+	Message    string                `json:"message"`
+	Data       *AuthCenterVerifyData `json:"data"`
 }
 
 type AuthCenterProfileResponse struct {
@@ -105,12 +110,12 @@ func JWTMiddlewareViaAuthCenter(authCenterURL string) gin.HandlerFunc {
 			return
 		}
 
-		if wrapped.Data == nil {
+		if wrapped.Data == nil || !wrapped.Data.Valid || wrapped.Data.User == nil {
 			logger.Error("[AUTH] invalid auth response", logger.F("reason", "user is missing"))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "invalid auth response"})
 			return
 		}
-		userID, parseErr := strconv.ParseUint(wrapped.Data.UserID, 10, strconv.IntSize)
+		userID, parseErr := strconv.ParseUint(wrapped.Data.User.UserID, 10, strconv.IntSize)
 		if parseErr != nil || userID == 0 {
 			logger.Error("[AUTH] invalid auth user", logger.F("reason", "invalid user id"))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": "invalid user id"})
@@ -120,7 +125,7 @@ func JWTMiddlewareViaAuthCenter(authCenterURL string) gin.HandlerFunc {
 		// 保存用户信息到上下文
 		logger.Info("[AUTH] verify success", logger.F("user_id", userID))
 		c.Set("user_id", uint(userID))
-		c.Set("roles", append([]string(nil), wrapped.Data.Roles...))
+		c.Set("roles", append([]string(nil), wrapped.Data.User.Roles...))
 		c.Next()
 	}
 }

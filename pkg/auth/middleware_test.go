@@ -40,8 +40,11 @@ func TestJWTMiddlewareUsesPAMGatewayVerifyResponse(t *testing.T) {
 			"status_code": 200,
 			"message": "ok",
 			"data": {
-				"user_id": "42",
-				"roles": ["player"]
+				"valid": true,
+				"user": {
+					"user_id": "42",
+					"roles": ["player"]
+				}
 			}
 		}`))
 	}))
