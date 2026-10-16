@@ -221,6 +221,24 @@ type Stats struct {
 	AvgScore   float64 `json:"avgScore"`
 }
 
+type LeaderboardSort string
+
+const (
+	LeaderboardSortMetric     LeaderboardSort = "metric"
+	LeaderboardSortTotalGames LeaderboardSort = "totalGames"
+)
+
+func ParseLeaderboardSort(value string) (LeaderboardSort, bool) {
+	switch LeaderboardSort(value) {
+	case "", LeaderboardSortMetric:
+		return LeaderboardSortMetric, true
+	case LeaderboardSortTotalGames:
+		return LeaderboardSortTotalGames, true
+	default:
+		return LeaderboardSortMetric, false
+	}
+}
+
 // StatsByUser computes win-rate stats scoped by game type. ended_at IS NOT
 // NULL means the game has a persisted result, including completed games and
 // progress-qualified abandoned games.
@@ -264,7 +282,7 @@ type LeaderboardEntry struct {
 
 // Leaderboard 返回指定 game_type 的全玩家聚合排行榜。ended_at IS NOT NULL
 // 的记录会计入排行，包括自然终局和进度过半后的弃局补录。
-func (r *Repo) Leaderboard(ctx context.Context, gameType string, limit, offset int) ([]LeaderboardEntry, error) {
+func (r *Repo) Leaderboard(ctx context.Context, gameType string, sort LeaderboardSort, limit, offset int) ([]LeaderboardEntry, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -277,17 +295,24 @@ func (r *Repo) Leaderboard(ctx context.Context, gameType string, limit, offset i
 
 	switch gameType {
 	case "davinci":
-		return r.leaderboardDavinci(ctx, limit, offset)
+		return r.leaderboardDavinci(ctx, sort, limit, offset)
 	case "acquire":
-		return r.leaderboardAcquire(ctx, limit, offset)
+		return r.leaderboardAcquire(ctx, sort, limit, offset)
 	case "splendor":
-		return r.leaderboardByAvgRank(ctx, "splendor", limit, offset)
+		return r.leaderboardByAvgRank(ctx, "splendor", sort, limit, offset)
 	default:
 		return nil, errors.New("invalid game_type")
 	}
 }
 
-func (r *Repo) leaderboardDavinci(ctx context.Context, limit, offset int) ([]LeaderboardEntry, error) {
+func leaderboardDavinciOrder(sort LeaderboardSort) string {
+	if sort == LeaderboardSortTotalGames {
+		return "total_games DESC, win_rate DESC, gp.user_id ASC"
+	}
+	return "win_rate DESC, total_games DESC, gp.user_id ASC"
+}
+
+func (r *Repo) leaderboardDavinci(ctx context.Context, sort LeaderboardSort, limit, offset int) ([]LeaderboardEntry, error) {
 	type row struct {
 		UserID     int64
 		TotalGames int
@@ -304,7 +329,7 @@ func (r *Repo) leaderboardDavinci(ctx context.Context, limit, offset int) ([]Lea
 		        1.0 * COUNT(*) FILTER (WHERE gp.is_winner) / COUNT(*) AS win_rate`).
 		Where("g.game_type = ? AND g.ended_at IS NOT NULL AND gp.user_id IS NOT NULL", "davinci").
 		Group("gp.user_id").
-		Order("win_rate DESC, total_games DESC, gp.user_id ASC").
+		Order(leaderboardDavinciOrder(sort)).
 		Limit(limit).
 		Offset(offset).
 		Scan(&rows).Error
@@ -330,13 +355,20 @@ func (r *Repo) leaderboardDavinci(ctx context.Context, limit, offset int) ([]Lea
 	return entries, nil
 }
 
-func (r *Repo) leaderboardAcquire(ctx context.Context, limit, offset int) ([]LeaderboardEntry, error) {
-	return r.leaderboardByAvgRank(ctx, "acquire", limit, offset)
+func (r *Repo) leaderboardAcquire(ctx context.Context, sort LeaderboardSort, limit, offset int) ([]LeaderboardEntry, error) {
+	return r.leaderboardByAvgRank(ctx, "acquire", sort, limit, offset)
 }
 
 // leaderboardByAvgRank 按"平均名次"聚合排行榜：名次越小越靠前。
 // 适用于以最终名次（final_rank）衡量强弱的游戏（acquire / splendor）。
-func (r *Repo) leaderboardByAvgRank(ctx context.Context, gameType string, limit, offset int) ([]LeaderboardEntry, error) {
+func leaderboardAvgRankOrder(sort LeaderboardSort) string {
+	if sort == LeaderboardSortTotalGames {
+		return "total_games DESC, avg_rank ASC, gp.user_id ASC"
+	}
+	return "avg_rank ASC, total_games DESC, gp.user_id ASC"
+}
+
+func (r *Repo) leaderboardByAvgRank(ctx context.Context, gameType string, sort LeaderboardSort, limit, offset int) ([]LeaderboardEntry, error) {
 	type row struct {
 		UserID     int64
 		TotalGames int
@@ -351,7 +383,7 @@ func (r *Repo) leaderboardByAvgRank(ctx context.Context, gameType string, limit,
 		        AVG(gp.final_rank)::float AS avg_rank`).
 		Where("g.game_type = ? AND g.ended_at IS NOT NULL AND gp.user_id IS NOT NULL AND gp.final_rank IS NOT NULL", gameType).
 		Group("gp.user_id").
-		Order("avg_rank ASC, total_games DESC, gp.user_id ASC").
+		Order(leaderboardAvgRankOrder(sort)).
 		Limit(limit).
 		Offset(offset).
 		Scan(&rows).Error

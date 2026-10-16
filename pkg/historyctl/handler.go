@@ -14,7 +14,7 @@ type HistoryStore interface {
 	ListByUser(ctx context.Context, userID int64, gameType string, limit, offset int) ([]gamehistory.Game, error)
 	Detail(ctx context.Context, gameID int64, gameType string) (*gamehistory.Game, []gamehistory.GamePlayer, []gamehistory.GameEvent, error)
 	StatsByUser(ctx context.Context, userID int64, gameType string) (gamehistory.Stats, error)
-	Leaderboard(ctx context.Context, gameType string, limit, offset int) ([]gamehistory.LeaderboardEntry, error)
+	Leaderboard(ctx context.Context, gameType string, sort gamehistory.LeaderboardSort, limit, offset int) ([]gamehistory.LeaderboardEntry, error)
 }
 
 type Options struct {
@@ -180,7 +180,12 @@ func MakeLeaderboardHandler(opts Options) gin.HandlerFunc {
 		}
 		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 		offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
-		entries, err := opts.Store.Leaderboard(c.Request.Context(), gameType, limit, offset)
+		sort, ok := gamehistory.ParseLeaderboardSort(c.DefaultQuery("sort", string(gamehistory.LeaderboardSortMetric)))
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sort"})
+			return
+		}
+		entries, err := opts.Store.Leaderboard(c.Request.Context(), gameType, sort, limit, offset)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
