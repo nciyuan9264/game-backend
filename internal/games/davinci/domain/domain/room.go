@@ -63,7 +63,11 @@ type GameState struct {
 	GameStartTime time.Time  `json:"gameStartTime"`
 	RoomStatus    RoomStatus `json:"roomStatus"`
 	OwnerID       string     `json:"ownerID"`
+	OwnerName     string     `json:"ownerName,omitempty"`
+	OwnerAvatar   string     `json:"ownerAvatar,omitempty"`
 	MaxPlayers    int        `json:"maxPlayers"`
+	PhaseVersion  uint64     `json:"phaseVersion"`
+	TurnNumber    uint64     `json:"turnNumber"`
 
 	BoardCards map[string]*Card        `json:"boardCards"`
 	Players    map[string]*PlayerState `json:"players"`

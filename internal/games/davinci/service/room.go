@@ -3,9 +3,12 @@ package service
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/nciyuan9264/game-backend/internal/games/davinci/domain/roompkg"
+	"github.com/nciyuan9264/game-backend/pkg/gamehistory"
 	"github.com/nciyuan9264/game-backend/pkg/logger"
 	"github.com/nciyuan9264/game-backend/pkg/roomctl"
 	"github.com/nciyuan9264/game-backend/pkg/roomctl/dto"
@@ -14,7 +17,16 @@ import (
 
 const roomSnapshotTimeout = time.Second
 
+var createMu sync.Mutex
+
 func CreateRoom(userID string) (string, error) {
+	return CreateRoomWithProfile(userID, "", "")
+}
+
+func CreateRoomWithProfile(userID, name, avatar string) (string, error) {
+	createMu.Lock()
+	defer createMu.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), roomSnapshotTimeout)
 	defer cancel()
 
@@ -32,8 +44,16 @@ func CreateRoom(userID string) (string, error) {
 
 	timePrefix := timeutil.Now().Format("0102_150405")
 	room_id := timePrefix
+	for suffix := 1; ; suffix++ {
+		if _, exists := roompkg.Rooms.Get(room_id); !exists {
+			break
+		}
+		room_id = fmt.Sprintf("%s_%d", timePrefix, suffix)
+	}
 
 	newRoom := roompkg.NewRoomService(room_id, userID)
+	newRoom.Room.State.OwnerName = name
+	newRoom.Room.State.OwnerAvatar = avatar
 
 	roompkg.Rooms.Set(room_id, newRoom)
 
@@ -57,8 +77,8 @@ func countOwnedRooms(ctx context.Context, userID string) (int, error) {
 	return owned, nil
 }
 
-func GetRoomList() ([]dto.RoomInfo, error) {
-	var rooms []dto.RoomInfo
+func GetRoomList(viewerID string) ([]dto.RoomInfo, error) {
+	rooms := make([]dto.RoomInfo, 0)
 	ctx, cancel := context.WithTimeout(context.Background(), roomSnapshotTimeout)
 	defer cancel()
 
@@ -72,24 +92,57 @@ func GetRoomList() ([]dto.RoomInfo, error) {
 		roomPlayers := make([]dto.RoomPlayer, 0, len(snapshot.Players))
 		for _, player := range snapshot.Players {
 			roomPlayers = append(roomPlayers, dto.RoomPlayer{
-				PlayerID: player.PlayerID,
-				Online:   player.Online,
-				AI:       player.AI,
-				Ready:    player.Ready,
+				PlayerID:  player.PlayerID,
+				Online:    player.Online,
+				AI:        player.AI,
+				Ready:     player.Ready,
+				SeatIndex: player.SeatIndex,
+				Name:      player.Name,
+				Avatar:    player.Avatar,
 			})
 		}
 
 		room := dto.RoomInfo{
 			RoomID:         snapshot.RoomID,
 			OwnerID:        snapshot.OwnerID,
+			OwnerName:      snapshot.OwnerName,
+			OwnerAvatar:    snapshot.OwnerAvatar,
 			Status:         snapshot.Status,
 			RoomPlayer:     roomPlayers,
+			PlayerOrder:    snapshot.PlayerOrder,
+			MaxPlayers:     snapshot.MaxPlayers,
 			BoardCardCount: snapshot.BoardCardCount,
+		}
+		room.IsMember = sameUserOrPlayer(snapshot.OwnerID, viewerID)
+		if !room.IsMember {
+			for _, player := range snapshot.Players {
+				if !sameUserOrPlayer(player.PlayerID, viewerID) {
+					continue
+				}
+				room.IsMember = true
+				break
+			}
 		}
 		rooms = append(rooms, room)
 	}
 
 	return rooms, nil
+}
+
+func sameUserOrPlayer(playerID, userID string) bool {
+	if playerID == userID {
+		return true
+	}
+	left, leftOK := numericUserID(playerID)
+	right, rightOK := numericUserID(userID)
+	return leftOK && rightOK && left == right
+}
+
+func numericUserID(value string) (int64, bool) {
+	if parsed, err := strconv.ParseInt(value, 10, 64); err == nil {
+		return parsed, true
+	}
+	return gamehistory.ParseUserIDFromPlayerID(value)
 }
 
 func GetGameStatus(roomID string) *roompkg.RoomStatusSnapshot {

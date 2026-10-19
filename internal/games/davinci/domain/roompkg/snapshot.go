@@ -15,18 +15,25 @@ var ErrRoomSnapshotUnavailable = errors.New("room snapshot unavailable")
 
 // RoomSnapshotPlayer is the copy-safe player view returned by a room actor.
 type RoomSnapshotPlayer struct {
-	PlayerID string
-	Online   bool
-	AI       bool
-	Ready    bool
+	PlayerID  string
+	Online    bool
+	AI        bool
+	Ready     bool
+	SeatIndex int
+	Name      string
+	Avatar    string
 }
 
 // RoomSnapshot is the copy-safe list view returned by a room actor.
 type RoomSnapshot struct {
 	RoomID         string
 	OwnerID        string
+	OwnerName      string
+	OwnerAvatar    string
 	Status         string
 	Players        []RoomSnapshotPlayer
+	PlayerOrder    []string
+	MaxPlayers     int
 	BoardCardCount int
 }
 
@@ -108,22 +115,32 @@ func (r *RoomService) buildSnapshot() RoomSnapshot {
 
 	if room.State != nil {
 		snapshot.OwnerID = room.State.OwnerID
+		snapshot.OwnerName = room.State.OwnerName
+		snapshot.OwnerAvatar = room.State.OwnerAvatar
 		snapshot.Status = string(room.State.RoomStatus)
+		snapshot.MaxPlayers = room.State.MaxPlayers
 		snapshot.BoardCardCount = len(room.State.BoardCards)
 	}
+	snapshot.PlayerOrder = append([]string(nil), room.PlayerSeq...)
 
 	for _, player := range room.Connections {
 		if player == nil {
 			continue
 		}
 		snapshot.Players = append(snapshot.Players, RoomSnapshotPlayer{
-			PlayerID: player.PlayerID,
-			Online:   player.Online,
-			AI:       player.AI,
-			Ready:    player.Ready,
+			PlayerID:  player.PlayerID,
+			Online:    player.Online,
+			AI:        player.AI,
+			Ready:     player.Ready,
+			SeatIndex: player.SeatIndex,
+			Name:      player.Name,
+			Avatar:    player.Avatar,
 		})
 	}
 	sort.Slice(snapshot.Players, func(i, j int) bool {
+		if snapshot.Players[i].SeatIndex != snapshot.Players[j].SeatIndex {
+			return snapshot.Players[i].SeatIndex < snapshot.Players[j].SeatIndex
+		}
 		return snapshot.Players[i].PlayerID < snapshot.Players[j].PlayerID
 	})
 
@@ -187,7 +204,11 @@ func cloneGameState(state *domain.GameState) *domain.GameState {
 		GameStartTime: state.GameStartTime,
 		RoomStatus:    state.RoomStatus,
 		OwnerID:       state.OwnerID,
+		OwnerName:     state.OwnerName,
+		OwnerAvatar:   state.OwnerAvatar,
 		MaxPlayers:    state.MaxPlayers,
+		PhaseVersion:  state.PhaseVersion,
+		TurnNumber:    state.TurnNumber,
 		BoardCards:    cloneCardMap(state.BoardCards),
 		Players:       clonePlayerStateMap(state.Players),
 		LastData:      cloneLastAction(state.LastData),

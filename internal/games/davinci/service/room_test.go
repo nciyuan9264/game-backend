@@ -29,7 +29,7 @@ func TestGetRoomListReturnsActorSnapshots(t *testing.T) {
 		close(rs.Room.QuitCh)
 	})
 
-	rooms, err := GetRoomList()
+	rooms, err := GetRoomList("1")
 	if err != nil {
 		t.Fatalf("GetRoomList returned error: %v", err)
 	}
@@ -48,6 +48,9 @@ func TestGetRoomListReturnsActorSnapshots(t *testing.T) {
 	}
 	if room.BoardCardCount != 1 {
 		t.Fatalf("board card count = %d, want 1", room.BoardCardCount)
+	}
+	if room.MaxPlayers != domain.DefaultMaxPlayers {
+		t.Fatalf("max players = %d, want %d", room.MaxPlayers, domain.DefaultMaxPlayers)
 	}
 	if len(room.RoomPlayer) != 1 || room.RoomPlayer[0].PlayerID != "owner-1" {
 		t.Fatalf("room players = %+v, want owner-1", room.RoomPlayer)

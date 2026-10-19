@@ -59,10 +59,13 @@ func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.Pl
 	playersInfo := make(map[string]interface{})
 	for _, p := range room.Connections {
 		playersInfo[p.PlayerID] = map[string]interface{}{
-			"playerID": p.PlayerID,
-			"online":   p.Online,
-			"ai":       p.AI,
-			"ready":    p.Ready,
+			"playerID":  p.PlayerID,
+			"online":    p.Online,
+			"ai":        p.AI,
+			"ready":     p.Ready,
+			"seatIndex": p.SeatIndex,
+			"name":      p.Name,
+			"avatar":    p.Avatar,
 		}
 	}
 	logger.Info("SyncRoomMessage", logger.F("room_id", room.ID), logger.F("player_id", pc.PlayerID))
@@ -129,17 +132,23 @@ func SyncRoomMessage(conn domain.WriteOnlyConn, room *domain.Room, pc *domain.Pl
 	}
 
 	msg := map[string]interface{}{
-		"type":     "ROOM_SYNC",
-		"playerId": pc.PlayerID,
-		"ownerID":  room.State.OwnerID,
+		"type":         "ROOM_SYNC",
+		"roomID":       room.ID,
+		"playerId":     pc.PlayerID,
+		"ownerID":      room.State.OwnerID,
+		"phaseVersion": room.State.PhaseVersion,
+		"turnNumber":   room.State.TurnNumber,
 		"roomData": map[string]interface{}{
 			"currentPlayer": room.State.CurrentPlayer,
 			"gameStatus":    room.State.RoomStatus,
 			"players":       playersInfo,
+			"playerOrder":   room.PlayerSeq,
 			"boardCards":    boardCards,
 			"lastData":      room.State.LastData,
 			"turnDeadline":  turnDeadline,
 			"turnTimeoutMs": int64(room.Base.TurnTimeout / time.Millisecond),
+			"phaseVersion":  room.State.PhaseVersion,
+			"turnNumber":    room.State.TurnNumber,
 		},
 		"cardData": map[string]interface{}{
 			"self":      selfCards,
@@ -162,20 +171,27 @@ func SyncMatchMessage(conn domain.WriteOnlyConn, r *domain.Room, pc *domain.Play
 	playersInfo := make(map[string]dto.RoomPlayer, 0)
 	for _, p := range r.Connections {
 		playersInfo[p.PlayerID] = dto.RoomPlayer{
-			PlayerID: p.PlayerID,
-			Online:   p.Online,
-			AI:       p.AI,
-			Ready:    p.Ready,
+			PlayerID:  p.PlayerID,
+			Online:    p.Online,
+			AI:        p.AI,
+			Ready:     p.Ready,
+			SeatIndex: p.SeatIndex,
+			Name:      p.Name,
+			Avatar:    p.Avatar,
 		}
 	}
 
 	msg := dto.WsMatchSyncData{
-		Type:     "MATCH_SYNC",
-		RoomID:   r.ID,
-		OwnerID:  r.State.OwnerID,
-		Status:   string(r.State.RoomStatus),
-		PlayerID: pc.PlayerID,
-		Players:  playersInfo,
+		Type:         "MATCH_SYNC",
+		RoomID:       r.ID,
+		OwnerID:      r.State.OwnerID,
+		Status:       string(r.State.RoomStatus),
+		PlayerID:     pc.PlayerID,
+		Players:      playersInfo,
+		MaxPlayers:   domain.DefaultMaxPlayers,
+		PlayerOrder:  append([]string(nil), r.PlayerSeq...),
+		PhaseVersion: r.State.PhaseVersion,
+		TurnNumber:   r.State.TurnNumber,
 	}
 
 	// ------- JSON 编码 -------

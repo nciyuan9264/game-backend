@@ -1,6 +1,7 @@
 package roompkg
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -34,15 +35,31 @@ func (r *RoomService) Run() {
 	for {
 		select {
 		case cmd := <-r.Room.CmdCh:
-			r.handleCommand(cmd)
-			roomcore.RearmThinkTimer(r.svc)
+			if cmd.Type == "davinci_timeout" {
+				action, ok := r.resolveTimeout(cmd)
+				if !ok {
+					continue
+				}
+				cmd = action
+			}
+			previousPlayer := r.Room.State.CurrentPlayer
+			if !r.handleCommand(cmd) {
+				continue
+			}
+			r.advanceVersion(previousPlayer, cmd.Type)
+			if commandMutatesState(cmd.Type) {
+				r.armTimer()
+			}
 			if r.Room.State.RoomStatus == domain.RoomStatusMatch {
 				game.BroadcastToMatch(r.Room)
-			} else {
+			} else if cmd.Type != "game_play_audio" {
 				game.BroadcastToRoom(r.Room)
 				if r.Room.State.RoomStatus == domain.RoomStatusEnd && !r.HistoryEnded {
 					r.finishHistory()
 				}
+			}
+			if cmd.RequestID != "" {
+				r.reply(cmd, "", "操作成功")
 			}
 		case req := <-r.snapshotCh:
 			req.reply <- r.buildSnapshot()
@@ -60,10 +77,17 @@ func (r *RoomService) Run() {
 }
 
 // handleCommand 处理房间命令
-func (r *RoomService) handleCommand(cmd domain.Command) {
+func (r *RoomService) handleCommand(cmd domain.Command) bool {
+	if !r.validateCommand(cmd) {
+		return false
+	}
 	switch cmd.Type {
 	case "connect":
 		roomcore.HandleConnect(r.svc, cmd)
+		if cmd.PlayerID == r.Room.State.OwnerID {
+			r.Room.State.OwnerName = cmd.Name
+			r.Room.State.OwnerAvatar = cmd.Avatar
+		}
 	case "disconnect":
 		roomcore.HandleDisconnect(r.svc, cmd)
 	case "match_ready":
@@ -73,15 +97,32 @@ func (r *RoomService) handleCommand(cmd domain.Command) {
 	case "match_add_ai":
 		roomcore.HandleAddAI(r.svc, cmd)
 	case "match_remove_player":
-		roomcore.HandleRemovePlayer(r.svc, cmd)
+		var payload struct {
+			PlayerID string `json:"playerID"`
+		}
+		_ = json.Unmarshal(cmd.Payload, &payload)
+		r.reply(domain.Command{PlayerID: payload.PlayerID}, "removed", "你已被移出房间")
+		if pc := r.Room.Connections[payload.PlayerID]; pc != nil && pc.Conn != nil {
+			_ = pc.Conn.Close()
+		}
+		roomcore.RemovePlayer(r.svc, payload.PlayerID)
 	case "game_ready":
 		roomcore.HandleReadyMessage(r.svc, cmd)
 	case "game_get_card":
-		game.HandleGetCardMessage(r.Room, cmd)
+		if err := game.HandleGetCardMessage(r.Room, cmd); err != nil {
+			r.reply(cmd, "command_failed", "抽牌失败，请重试")
+			return false
+		}
 	case "game_guess_card":
-		game.HandleGuessCardMessage(r.Room, cmd)
+		if err := game.HandleGuessCardMessage(r.Room, cmd); err != nil {
+			r.reply(cmd, "command_failed", "猜牌失败，请重试")
+			return false
+		}
 	case "game_set_card":
-		game.HandleSetCardMessage(r.Room, cmd)
+		if err := game.HandleSetCardMessage(r.Room, cmd); err != nil {
+			r.reply(cmd, "command_failed", "放回失败，请重试")
+			return false
+		}
 	case "turn_timeout":
 		game.HandleTurnTimeoutMessage(r.Room, cmd)
 	case "game_play_audio":
@@ -91,7 +132,9 @@ func (r *RoomService) handleCommand(cmd domain.Command) {
 		r.resetHistoryState()
 	default:
 		logger.Warn("未知命令类型", logger.F("command_type", cmd.Type))
+		return false
 	}
+	return true
 }
 
 func HandleMatchBegin(r *domain.Room, cmd domain.Command) {

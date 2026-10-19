@@ -556,21 +556,24 @@ func anyOpponentHiddenCard(r *domain.Room, playerID string) (string, domain.Card
 // BuildTurnTimeoutCommand 思考超时时由 roomcore 调用。
 // 与 MaybeRunAIIfNeeded 共用 buildAIActionMsg，但 PlayerID 用真实玩家 ID，且不修改身份。
 func BuildTurnTimeoutCommand(r *domain.Room, playerID string) (roomcore.Command, bool) {
+	version := r.State.PhaseVersion
 	cmdType, payload, ok := buildAIActionMsg(r, playerID, r.State.RoomStatus)
 	if !ok {
 		// 兜底：发出 turn_timeout 强制切人，避免房间永久卡死。
 		return roomcore.Command{
-			Type:     "turn_timeout",
-			PlayerID: playerID,
-			Payload:  []byte("{}"),
-			Conn:     &VirtualConn{Room: r},
+			Type:         "turn_timeout",
+			PlayerID:     playerID,
+			Payload:      []byte("{}"),
+			Conn:         &VirtualConn{Room: r},
+			PhaseVersion: &version,
 		}, true
 	}
 	return roomcore.Command{
-		Type:     cmdType,
-		PlayerID: playerID,
-		Payload:  payload,
-		Conn:     &VirtualConn{Room: r},
+		Type:         cmdType,
+		PlayerID:     playerID,
+		Payload:      payload,
+		Conn:         &VirtualConn{Room: r},
+		PhaseVersion: &version,
 	}, true
 }
 

@@ -123,7 +123,6 @@ func HandleGuessCardMessage(r *domain.Room, cmd domain.Command) error {
 		} else if r.State.RoomStatus == domain.RoomStatusGuessCard {
 			r.State.RoomStatus = domain.RoomStatusSetCard
 		}
-		BroadcastToRoom(r)
 		return nil
 	}
 

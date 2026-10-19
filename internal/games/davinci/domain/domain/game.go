@@ -14,9 +14,12 @@ type RealConn struct {
 	LastPongTime time.Time
 	Done         chan struct{}
 	closeOnce    sync.Once
+	writeMu      sync.Mutex
 }
 
 func (r *RealConn) WriteMessage(messageType int, data []byte) error {
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
 	return r.Conn.WriteMessage(messageType, data)
 }
 

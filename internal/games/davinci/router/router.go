@@ -13,11 +13,16 @@ import (
 func InitRouter(r *gin.Engine) {
 	authCenterURL := auth.CenterURL()
 
-	api := r.Group("/room")
-	api.Use(auth.JWTMiddlewareViaAuthCenter(authCenterURL)) // 统一鉴权
+	profileAPI := r.Group("/room")
+	profileAPI.Use(auth.AuthProfileMiddlewareViaAuthCenter(authCenterURL))
 	{
-		api.POST("/create", roomctl.MakeCreateHandler(service.CreateRoom))
-		api.GET("/list", roomctl.MakeListHandler(service.GetRoomList))
+		profileAPI.POST("/create", createRoom)
+	}
+
+	api := r.Group("/room")
+	api.Use(auth.JWTMiddlewareViaAuthCenter(authCenterURL))
+	{
+		api.GET("/list", listRooms)
 		api.GET("/game_status", roomctl.MakeStatusHandler(service.GetGameStatus))
 	}
 
@@ -51,5 +56,5 @@ func InitRouter(r *gin.Engine) {
 	}
 
 	// WebSocket 路由
-	r.GET("/ws", ws.HandleWebSocket)
+	r.GET("/ws", auth.AuthProfileMiddlewareViaAuthCenter(authCenterURL), ws.HandleWebSocket)
 }

@@ -48,6 +48,8 @@ func NewRoomService(roomID, ownerID string) *RoomService {
 			rs.Room.State.OwnerID = pid
 			if pc, ok := rs.Room.Connections[pid]; ok {
 				pc.Ready = true
+				rs.Room.State.OwnerName = pc.Name
+				rs.Room.State.OwnerAvatar = pc.Avatar
 			}
 		},
 		OnAllReady: func(rs *RoomService, cmd roomcore.Command) {
@@ -63,15 +65,6 @@ func NewRoomService(roomID, ownerID string) *RoomService {
 		},
 		OnRoomDeleted: func(rs *RoomService) { Rooms.Delete(rs.Room.ID) },
 		GenAIPlayerID: func(rs *RoomService) string { return genAIPlayerID(rs.Room) },
-
-		GetCurrentPlayer: func(rs *RoomService) string { return rs.Room.State.CurrentPlayer },
-		GetTurnTimeout: func(rs *RoomService) (time.Duration, bool) {
-			d, ok := turnTimeoutByStatus[rs.Room.State.RoomStatus]
-			return d, ok
-		},
-		BuildTimeoutCommand: func(rs *RoomService, pid string) (roomcore.Command, bool) {
-			return BuildTurnTimeoutCommand(rs.Room, pid)
-		},
 
 		Logger: coreLogger{},
 	}

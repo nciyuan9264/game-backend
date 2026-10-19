@@ -30,6 +30,7 @@ services:
     environment:
       - POSTGRES_DSN=${POSTGRES_DSN}
       - AUTH_CENTER_URL=${AUTH_CENTER_URL:-http://pam-gateway:8080/pam-api/platform/auth}
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-http://localhost:5178,http://127.0.0.1:5178}
     volumes:
       - /var/log/davinci:/app/game_logs
     networks:
