@@ -1,9 +1,6 @@
-name: Deploy to Tengxun Server
+name: Legacy game backend deploy (disabled)
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
@@ -12,6 +9,7 @@ jobs:
   # - 改了共享文件（pkg/、go.mod/go.sum、Dockerfile、compose、workflow）→ 三个游戏全部重建；
   # - 手动触发（workflow_dispatch）→ 强制全部重建。
   changes:
+    if: ${{ false }}
     runs-on: ubuntu-22.04
     outputs:
       davinci: ${{ steps.decide.outputs.davinci }}
