@@ -3,7 +3,7 @@ services:
     image: sgccr.ccs.tencentyun.com/tengxuntcr/acquire:latest
     container_name: backend-acquire
     environment:
-      - POSTGRES_DSN=${POSTGRES_DSN}
+      - POSTGRES_DSN=${POSTGRES_DSN:?set shared PostgreSQL DSN}
       - AUTH_CENTER_URL=${AUTH_CENTER_URL:-http://pam-gateway:8080/pam-api/platform/auth}
     #   - ACQUIRE_LOADTEST_ENABLED=${ACQUIRE_LOADTEST_ENABLED:-true}
     #   - ACQUIRE_LOADTEST_TOKEN=${ACQUIRE_LOADTEST_TOKEN:-local-test-token}
@@ -18,7 +18,7 @@ services:
     image: sgccr.ccs.tencentyun.com/tengxuntcr/davinci:latest
     container_name: backend-davinci
     environment:
-      - POSTGRES_DSN=${POSTGRES_DSN}
+      - POSTGRES_DSN=${POSTGRES_DSN:?set shared PostgreSQL DSN}
       - AUTH_CENTER_URL=${AUTH_CENTER_URL:-http://pam-gateway:8080/pam-api/platform/auth}
     volumes:
       - /var/log/davinci:/app/game_logs
@@ -30,7 +30,7 @@ services:
     image: sgccr.ccs.tencentyun.com/tengxuntcr/splendor:latest
     container_name: backend-splendor
     environment:
-      - POSTGRES_DSN=${POSTGRES_DSN}
+      - POSTGRES_DSN=${POSTGRES_DSN:?set shared PostgreSQL DSN}
       - AUTH_CENTER_URL=${AUTH_CENTER_URL:-http://pam-gateway:8080/pam-api/platform/auth}
     volumes:
       - /var/log/splendor:/app/game_logs

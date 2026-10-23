@@ -7,7 +7,7 @@ services:
       args:
         GAME: acquire
     environment:
-      - POSTGRES_DSN=${POSTGRES_DSN}
+      - POSTGRES_DSN=${POSTGRES_DSN:?set shared PostgreSQL DSN}
       - AUTH_CENTER_URL=${AUTH_CENTER_URL:-http://pam-gateway:8080/pam-api/platform/auth}
       - ACQUIRE_LOADTEST_ENABLED=${ACQUIRE_LOADTEST_ENABLED:-true}
       - ACQUIRE_LOADTEST_TOKEN=${ACQUIRE_LOADTEST_TOKEN:-local-test-token}
@@ -28,7 +28,7 @@ services:
       args:
         GAME: davinci
     environment:
-      - POSTGRES_DSN=${POSTGRES_DSN}
+      - POSTGRES_DSN=${POSTGRES_DSN:?set shared PostgreSQL DSN}
       - AUTH_CENTER_URL=${AUTH_CENTER_URL:-http://pam-gateway:8080/pam-api/platform/auth}
       - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-http://localhost:5178,http://127.0.0.1:5178}
     volumes:
@@ -47,7 +47,7 @@ services:
       args:
         GAME: splendor
     environment:
-      - POSTGRES_DSN=${POSTGRES_DSN}
+      - POSTGRES_DSN=${POSTGRES_DSN:?set shared PostgreSQL DSN}
       - AUTH_CENTER_URL=${AUTH_CENTER_URL:-http://pam-gateway:8080/pam-api/platform/auth}
       - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-http://localhost:5182,http://127.0.0.1:5182}
     volumes:

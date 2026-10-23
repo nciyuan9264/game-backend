@@ -34,6 +34,8 @@ jobs:
               - 'deployments/Dockerfile'
               - 'docker-compose.yml'
               - 'docker-compose.prod.yml'
+              - '.env.example'
+              - 'scripts/**'
               - '.github/workflows/deploy.yml'
             davinci:
               - 'internal/games/davinci/**'
@@ -133,13 +135,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Upload production Compose file
+      - name: Upload production configuration
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: docker-compose.prod.yml
+          source: 'docker-compose.prod.yml,scripts/validate-prod-config.sh'
           target: /home/game-backend
 
       # SSH 到服务器，只拉取/重建发生变更的游戏服务。
@@ -151,7 +153,11 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            set -eu
             cd /home/game-backend
+            test -f .env
+            chmod +x scripts/validate-prod-config.sh
+            ./scripts/validate-prod-config.sh
             services=""
             [ "${{ needs.changes.outputs.davinci }}" = "true" ]  && services="$services davinci"
             [ "${{ needs.changes.outputs.acquire }}" = "true" ]  && services="$services acquire"
